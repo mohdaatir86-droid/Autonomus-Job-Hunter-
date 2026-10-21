@@ -38,7 +38,7 @@ button,select,input{font:inherit;border:1px solid #d0d5dd;border-radius:10px;pad
 </div></section>
 <div class="filters">
 <input id="search" type="search" placeholder="Search role, company or city" aria-label="Search role, company or city" onkeydown="if(event.key==='Enter')loadJobs()">
-<select id="country"><option value="">All target countries</option><option>India</option><option>United Arab Emirates</option><option>Saudi Arabia</option><option>Qatar</option><option>Kuwait</option><option>Oman</option><option>Canada</option><option>Bahrain</option><option>Remote / Unspecified</option></select>
+<select id="country" aria-label="Filter by target country"><option value="">All 7 target countries</option><option>India</option><option>United Arab Emirates</option><option>Saudi Arabia</option><option>Qatar</option><option>Kuwait</option><option>Oman</option><option>Canada</option></select>
 <select id="score"><option value="0" selected>Any match score</option><option value="70">AI match score (70+)</option><option value="50">50+ match</option><option value="65">65+ strong match</option><option value="80">80+ top match</option></select>
 <select id="posted"><option value="1" selected>Posted in last 24 hours</option><option value="3">Posted in last 3 days</option><option value="7">Posted in last 7 days</option><option value="">Any posting date</option></select>
 <select id="status"><option value="">All statuses</option><option value="new">New</option><option value="saved">Saved</option><option value="applied_manually">Applied manually</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Rejected</option><option value="not_relevant">Not relevant</option></select>
