@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import hmac
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from job_hunter import hunt_jobs, get_stats, list_jobs, get_settings, save_settings, init_db, set_job_status
 from application_workflow import init_workflow_db, get_profile, save_profile, store_resume, create_application_draft, list_application_drafts, update_draft_status, get_draft_events
@@ -40,6 +41,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Autonomous Job Hunter", version="0.1.0", description="Job discovery, deduplication, candidate matching and application tracking. Submission is intentionally disabled by default.", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "*").split(","), allow_credentials=False, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])
+
+@app.middleware("http")
+async def protect_private_candidate_data(request, call_next):
+    path = request.url.path
+    protected = path == "/api/profile" or path.startswith("/api/profile/") or path == "/api/applications" or path.startswith("/api/applications/")
+    if protected:
+        expected = os.getenv("PORTAL_ACCESS_TOKEN", "").strip()
+        if not expected:
+            return JSONResponse(status_code=503, content={"detail": "Private profile features are locked until PORTAL_ACCESS_TOKEN is configured in Render."})
+        supplied = request.headers.get("authorization", "")
+        token = supplied[7:] if supplied.lower().startswith("bearer ") else ""
+        if not token or not hmac.compare_digest(token, expected):
+            return JSONResponse(status_code=401, content={"detail": "Enter the private portal access token to use profile and application drafts."})
+    return await call_next(request)
+
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
