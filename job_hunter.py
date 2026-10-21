@@ -361,6 +361,54 @@ async def fetch_public_sources(settings):
                 if item: results.append(item)
         except Exception as exc:
             errors.append({"source": "Jobicy", "error": str(exc)[:300]})
+        # Optional Google Jobs discovery through SerpApi. Requires SERPAPI_API_KEY.
+        # Uses the provider API; it does not log into job portals or automate their websites.
+        serpapi_key = os.getenv("SERPAPI_API_KEY", "").strip()
+        if serpapi_key:
+            role_queries = [
+                "Senior Cluster Manager operations", "City Operations Manager",
+                "Regional Operations Manager supply chain", "Warehouse Fulfilment Manager",
+                "Dark Store Manager", "Last Mile Operations Manager", "Program Manager operations"
+            ]
+            allowed_countries = {
+                "India", "United Arab Emirates", "Saudi Arabia", "Qatar",
+                "Kuwait", "Oman", "Canada"
+            }
+            for country in settings.get("target_countries", DEFAULT_COUNTRIES):
+                if country not in allowed_countries:
+                    continue
+                for role in role_queries:
+                    try:
+                        data = await _get_json(client, "https://serpapi.com/search.json", {
+                            "engine": "google_jobs", "q": role, "location": country,
+                            "api_key": serpapi_key, "hl": "en"
+                        })
+                        for row in data.get("jobs_results", [])[:min(15, limit)]:
+                            detected = row.get("detected_extensions") or {}
+                            apply_options = row.get("apply_options") or []
+                            job_url = row.get("share_link") or (
+                                apply_options[0].get("link")
+                                if apply_options and isinstance(apply_options[0], dict) else ""
+                            )
+                            if not job_url:
+                                continue
+                            item = _clean_job({
+                                "id": row.get("job_id") or job_url,
+                                "title": row.get("title"),
+                                "company": row.get("company_name"),
+                                "location": row.get("location") or country,
+                                "url": job_url,
+                                "description": row.get("description") or "",
+                                "job_type": detected.get("schedule_type", ""),
+                                "publication_date": detected.get("posted_at", ""),
+                                "salary": detected.get("salary", "")
+                            }, "Google Jobs (SerpApi)")
+                            if item:
+                                item["country"] = country
+                                results.append(item)
+                    except Exception as exc:
+                        errors.append({"source": "Google Jobs:" + country, "error": str(exc)[:300]})
+                        break
         # Public company job boards configured by the operator.
         greenhouse_boards = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
         for board in greenhouse_boards[:30]:
