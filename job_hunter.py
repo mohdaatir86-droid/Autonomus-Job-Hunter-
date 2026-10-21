@@ -45,8 +45,13 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 def connect():
+    db_path = Path(DB_PATH)
+    if str(DB_PATH) != ":memory:":
+        db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 def init_db():
@@ -381,9 +386,12 @@ def list_jobs(country=None, opportunity=None, min_score=0, status=None, limit=10
     with connect() as conn:
         rows = [dict(row) for row in conn.execute(sql, params).fetchall()]
     for row in rows:
-        row["match_reasons"] = json.loads(row.get("match_reasons") or "[]")
+        try:
+            row["match_reasons"] = json.loads(row.get("match_reasons") or "[]")
+        except (TypeError, json.JSONDecodeError):
+            row["match_reasons"] = []
         row.pop("raw_json", None)
-        row.pop("description", None) if not row.get("description") else None
+        row.pop("description", None)
     return rows
 
 def get_stats():
