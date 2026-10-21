@@ -1,15 +1,16 @@
 import asyncio
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
-from job_hunter import hunt_jobs, get_stats, list_jobs, get_settings, save_settings, init_db
+from job_hunter import hunt_jobs, get_stats, list_jobs, get_settings, save_settings, init_db, set_job_status
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("job-hunter")
@@ -38,6 +39,9 @@ app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "*").
 
 @app.get("/")
 def root():
+    dashboard = Path(__file__).with_name("dashboard.html")
+    if dashboard.exists():
+        return FileResponse(dashboard)
     return {"name": "Autonomous Job Hunter", "status": "ready", "version": app.version, "docs": "/docs", "health": "/health"}
 
 @app.get("/health")
@@ -49,20 +53,12 @@ def stats():
     return get_stats()
 
 @app.get("/api/jobs")
-def jobs(
-    country: str | None = None,
-    opportunity: str | None = None,
-    min_score: int = Query(default=0, ge=0, le=100),
-    status: str | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-):
+def jobs(country: str | None = None, opportunity: str | None = None, min_score: int = Query(default=0, ge=0, le=100), status: str | None = None, limit: int = Query(default=100, ge=1, le=500), offset: int = Query(default=0, ge=0)):
     return {"items": list_jobs(country=country, opportunity=opportunity, min_score=min_score, status=status, limit=limit, offset=offset)}
 
 @app.post("/api/hunt")
 async def hunt():
-    result = await hunt_jobs()
-    return result
+    return await hunt_jobs()
 
 @app.get("/api/settings")
 def settings():
@@ -79,12 +75,14 @@ def update_settings(payload: dict[str, Any]):
 
 @app.post("/api/jobs/{job_id}/status")
 def update_job_status(job_id: int, payload: dict[str, Any]):
-    from job_hunter import set_job_status
     status = str(payload.get("status", "")).strip().lower()
     allowed = {"saved", "applied_manually", "interview", "rejected", "offer", "not_relevant"}
     if status not in allowed:
-        return {"error": "status must be one of " + ", ".join(sorted(allowed))}
-    return set_job_status(job_id, status)
+        raise HTTPException(status_code=422, detail="status must be one of " + ", ".join(sorted(allowed)))
+    result = set_job_status(job_id, status)
+    if not result.get("updated"):
+        raise HTTPException(status_code=404, detail="job not found")
+    return result
 
 @app.get("/api/sources")
 def sources():
