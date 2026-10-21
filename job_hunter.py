@@ -142,7 +142,7 @@ def score_job(job, settings):
     for terms, points, reason in role_groups:
         if any(term in title for term in terms):
             role_score = max(role_score, points)
-            reasons.append(reason)
+            reasons.append("Target role: " + reason)
             break
     if role_score == 5 and any(term in title for term in ["operations", "logistics", "warehouse", "fulfil", "fulfill", "supply chain", "cluster", "distribution", "inventory"]):
         role_score = 20
@@ -188,7 +188,7 @@ def score_job(job, settings):
         reasons.append("Leadership seniority")
     if any(x in title for x in ["intern", "internship", "junior", "entry level", "graduate trainee", "assistant"]):
         score -= 18
-        reasons.append("Potential seniority mismatch")
+        reasons.append("Seniority mismatch")
 
     score = max(0, min(100, score))
     # Avoid false confidence: an unknown location cannot be classified as a top match.
