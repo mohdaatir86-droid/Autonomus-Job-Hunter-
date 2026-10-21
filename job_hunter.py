@@ -37,8 +37,13 @@ COUNTRY_ALIASES = {
 DEFAULT_SETTINGS = {
     "target_countries": DEFAULT_COUNTRIES,
     "target_titles": DEFAULT_TITLES,
-    "min_match_score": 35,
-    "max_results_per_source": 100
+    "min_match_score": 70,
+    "max_results_per_source": 100,
+    "min_india_salary_lpa": 18,
+    "min_experience_years": 8,
+    "work_arrangement": "all",
+    "posted_within_days": 1,
+    "visa_preference": "any"
 }
 
 def now_iso():
