@@ -352,7 +352,7 @@ async def hunt_jobs():
             (started, now_iso(), 3 + len([x for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]) + len([x for x in os.getenv("LEVER_SITES", "").split(",") if x.strip()]), len(fetched), inserted, json.dumps(errors)))
     return {"status": "completed", "started_at": started, "finished_at": now_iso(), "fetched": len(fetched), "new_jobs": inserted, "updated_jobs": updated, "errors": errors, "live_applications_enabled": False}
 
-def list_jobs(country=None, opportunity=None, min_score=0, status=None, limit=100, offset=0):
+def list_jobs(country=None, opportunity=None, min_score=0, status=None, limit=100, offset=0, q=None):
     init_db()
     clauses = ["match_score >= ?"]
     params: list[Any] = [min_score]
@@ -362,6 +362,12 @@ def list_jobs(country=None, opportunity=None, min_score=0, status=None, limit=10
     if status:
         clauses.append("status = ?")
         params.append(status)
+    if q and normalize_text(q):
+        terms = [term.lower() for term in normalize_text(q).split() if len(term) > 1][:8]
+        for term in terms:
+            clauses.append("(lower(title) LIKE ? OR lower(company) LIKE ? OR lower(location) LIKE ?)")
+            like = "%" + term.replace("%", "\\%").replace("_", "\\_") + "%"
+            params.extend([like, like, like])
     if opportunity and opportunity.lower() != "all":
         if opportunity.lower() == "high demand":
             clauses.append("match_score >= 65")
