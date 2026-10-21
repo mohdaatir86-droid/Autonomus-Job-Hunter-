@@ -36,7 +36,7 @@ COUNTRY_ALIASES = {
 DEFAULT_SETTINGS = {
     "target_countries": DEFAULT_COUNTRIES,
     "target_titles": DEFAULT_TITLES,
-    "min_match_score": 70,
+    "min_match_score": 45,
     "max_results_per_source": 100,
     "min_india_salary_lpa": 15,
     "min_experience_years": 8,
@@ -250,11 +250,25 @@ def score_job(job, settings):
     return score, reasons, country
 
 def _parse_iso(value):
-    if not value:
+    if value is None or value == "":
         return None
+    # Some public APIs return Unix timestamps instead of ISO dates.
+    # Normalize seconds/milliseconds to UTC ISO strings so SQLite freshness
+    # filters compare dates rather than raw epoch digits.
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().isdigit()):
+        try:
+            stamp = float(value)
+            if stamp > 10_000_000_000:
+                stamp /= 1000.0
+            return datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat()
+        except (ValueError, OverflowError, OSError):
+            return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).isoformat()
-    except Exception:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
+    except (TypeError, ValueError, OverflowError):
         return str(value)[:80]
 
 def _job_url(job):
