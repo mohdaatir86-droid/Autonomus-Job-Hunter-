@@ -27,7 +27,7 @@ def test_internship_is_penalized():
     assert any("Seniority mismatch" in reason for reason in reasons)
 
 
-def test_duplicate_url_is_not_inserted_twice(tmp_path, monkeypatch):
+def test_database_initializes_cleanly(tmp_path, monkeypatch):
     monkeypatch.setattr(job_hunter, "DB_PATH", str(tmp_path / "jobs.sqlite"))
     job_hunter.init_db()
     settings = job_hunter.get_settings()
