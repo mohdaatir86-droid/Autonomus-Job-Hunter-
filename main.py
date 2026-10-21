@@ -23,7 +23,9 @@ async def lifespan(app: FastAPI):
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
             scheduler = AsyncIOScheduler(timezone="UTC")
             minutes = max(15, int(os.getenv("HUNT_INTERVAL_MINUTES", "15")))
-            scheduler.add_job(lambda: asyncio.create_task(hunt_jobs()), "interval", minutes=minutes, id="job-hunt", replace_existing=True, max_instances=1, coalesce=True)
+            async def scheduled_hunt():
+                await hunt_jobs()
+            scheduler.add_job(scheduled_hunt, "interval", minutes=minutes, id="job-hunt", replace_existing=True, max_instances=1, coalesce=True)
             scheduler.start()
             app.state.scheduler = scheduler
             log.info("Job discovery scheduler started; interval=%s minutes", minutes)
