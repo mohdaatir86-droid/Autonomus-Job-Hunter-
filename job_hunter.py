@@ -12,7 +12,7 @@ import httpx
 
 log = logging.getLogger("job-hunter")
 DB_PATH = os.getenv("DATABASE_PATH", "job_hunter.db")
-DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"]
+DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Bahrain"]
 DEFAULT_TITLES = [
     "Senior Cluster Manager", "City Operations Manager", "Operations Manager",
     "Program Manager", "Head of Operations", "Warehouse Manager",
@@ -32,14 +32,14 @@ COUNTRY_ALIASES = {
     "qatar": ["qatar", "doha"],
     "kuwait": ["kuwait", "kuwait city"],
     "oman": ["oman", "muscat"],
-    "canada": ["canada", "toronto", "vancouver", "calgary", "montreal", "ottawa", "edmonton"]
+    "bahrain": ["bahrain", "manama"]
 }
 DEFAULT_SETTINGS = {
     "target_countries": DEFAULT_COUNTRIES,
     "target_titles": DEFAULT_TITLES,
     "min_match_score": 70,
     "max_results_per_source": 100,
-    "min_india_salary_lpa": 18,
+    "min_india_salary_lpa": 15,
     "min_experience_years": 8,
     "work_arrangement": "all",
     "posted_within_days": 1,
@@ -87,6 +87,10 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         for key, value in DEFAULT_SETTINGS.items():
             conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)", (key, json.dumps(value)))
+        # Migrate the previous default profile so redeploys do not retain Canada / ₹18 LPA.
+        conn.execute("UPDATE settings SET value=? WHERE key='target_countries' AND value LIKE '%Canada%'",
+                     (json.dumps(DEFAULT_COUNTRIES),))
+        conn.execute("UPDATE settings SET value='15' WHERE key='min_india_salary_lpa' AND value='18'")
 
 def get_settings():
     init_db()
@@ -118,7 +122,7 @@ def detect_country(location, title="", description=""):
         ("Qatar", ["qatar", "doha"]),
         ("Kuwait", ["kuwait", "kuwait city"]),
         ("Oman", ["oman", "muscat", "salalah"]),
-        ("Canada", ["canada", "toronto", "vancouver", "calgary", "montreal", "ottawa", "edmonton", "winnipeg", "mississauga"]),
+        ("Bahrain", ["bahrain", "manama"]),
         ("India", ["india", "new delhi", "delhi", "gurugram", "gurgaon", "noida", "mumbai", "bengaluru", "bangalore", "hyderabad", "pune", "chennai", "faridabad", "jaipur", "lucknow"]),
         ("United States", ["united states", "united states of america", "usa", "u.s.a.", "new york", "san francisco", "seattle", "austin", "boston", "los angeles", "chicago", "denver"]),
         ("United Kingdom", ["united kingdom", "uk", "london", "manchester", "birmingham", "edinburgh", "glasgow"]),
@@ -205,7 +209,7 @@ def score_job(job, settings):
         "united arab emirates": {"united arab emirates", "uae"},
         "saudi arabia": {"saudi arabia"},
         "india": {"india"},
-        "canada": {"canada"},
+        "bahrain": {"bahrain"},
         "qatar": {"qatar"},
         "kuwait": {"kuwait"},
         "oman": {"oman"},
