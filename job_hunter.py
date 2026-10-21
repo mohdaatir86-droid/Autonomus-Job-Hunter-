@@ -97,52 +97,104 @@ def normalize_text(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 def detect_country(location, title="", description=""):
-    haystack = " ".join([str(location or ""), str(title or ""), str(description or "")]).lower()
-    # Do not infer a country from a remote/anywhere label alone.
-    for country, aliases in COUNTRY_ALIASES.items():
-        if any(alias in haystack for alias in aliases):
-            return country.title() if country != "united arab emirates" else "United Arab Emirates"
-    return "Remote / Unspecified" if any(x in haystack for x in ["remote", "worldwide", "anywhere"]) else "Unspecified"
-
+    """Classify from location fields only; never infer a job's country from its marketing copy."""
+    loc = normalize_text(location).lower()
+    if not loc or loc in {"remote", "worldwide", "anywhere", "remote worldwide", "global"}:
+        return "Remote / Unspecified" if loc else "Unspecified"
+    # Specific aliases first, and only against the location string.
+    aliases = [
+        ("United Arab Emirates", ["united arab emirates", "uae", "dubai", "abu dhabi", "sharjah", "ajman", "ras al khaimah"]),
+        ("Saudi Arabia", ["saudi arabia", "riyadh", "jeddah", "dammam", "khobar", "mecca", "makkah", "medina", "madinah"]),
+        ("Qatar", ["qatar", "doha"]),
+        ("Kuwait", ["kuwait"]),
+        ("Oman", ["oman", "muscat", "salalah"]),
+        ("Canada", ["canada", "toronto", "vancouver", "calgary", "montreal", "ottawa", "edmonton", "winnipeg", "mississauga"]),
+        ("India", ["india", "new delhi", "delhi", "gurugram", "gurgaon", "noida", "mumbai", "bengaluru", "bangalore", "hyderabad", "pune", "chennai", "faridabad", "jaipur", "lucknow"]),
+    ]
+    padded = " " + re.sub(r"[^a-z0-9]+", " ", loc).strip() + " "
+    for country, terms in aliases:
+        for term in terms:
+            needle = " " + re.sub(r"[^a-z0-9]+", " ", term).strip() + " "
+            if needle in padded:
+                return country
+    if any(x in loc for x in ["remote", "worldwide", "anywhere", "work from home", "distributed"]):
+        return "Remote / Unspecified"
+    return "Unspecified"
 def score_job(job, settings):
+    """Explainable role-fit score, separated from uncertain location evidence."""
     title = normalize_text(job.get("title")).lower()
-    company = normalize_text(job.get("company")).lower()
     location = normalize_text(job.get("location")).lower()
     description = normalize_text(job.get("description")).lower()
-    text = " ".join([title, company, location, description])
+    text = " ".join([title, description])
     score = 0
     reasons = []
-    titles = [str(x).lower() for x in settings.get("target_titles", DEFAULT_TITLES)]
-    title_hits = [t for t in titles if t in title]
-    if title_hits:
-        score += 42
-        reasons.append("Target role: " + title_hits[0])
-    elif any(term in title for term in ["operations", "logistics", "warehouse", "fulfil", "fulfill", "supply chain", "cluster", "program manager"]):
-        score += 25
-        reasons.append("Related operations leadership title")
-    else:
-        score += 5
-    skill_hits = [s for s in DEFAULT_SKILLS if s in text]
-    skill_points = min(30, len(skill_hits) * 3)
-    score += skill_points
-    if skill_hits:
-        reasons.append("Relevant skills: " + ", ".join(skill_hits[:5]))
-    country = job.get("country") or detect_country(location, job.get("title"), description)
+
+    # Role relevance is weighted more heavily than incidental keyword mentions.
+    role_groups = [
+        (["senior cluster manager", "cluster manager", "city operations manager", "city manager"], 38, "Cluster/city operations leadership"),
+        (["head of operations", "director of operations", "regional operations manager", "regional operations"], 38, "Regional or head-of-operations leadership"),
+        (["operations manager", "program manager", "programme manager", "general manager operations"], 34, "Operations/program management"),
+        (["warehouse manager", "fulfilment manager", "fulfillment manager", "fulfillment operations", "warehouse operations manager"], 34, "Warehouse/fulfilment leadership"),
+        (["supply chain manager", "logistics manager", "last mile manager", "last-mile manager", "dark store manager", "store operations manager"], 32, "Supply-chain/logistics leadership"),
+        (["operations lead", "logistics lead", "warehouse lead", "fulfilment lead", "fulfillment lead"], 27, "Operations team leadership"),
+    ]
+    role_score = 5
+    for terms, points, reason in role_groups:
+        if any(term in title for term in terms):
+            role_score = max(role_score, points)
+            reasons.append(reason)
+            break
+    if role_score == 5 and any(term in title for term in ["operations", "logistics", "warehouse", "fulfil", "fulfill", "supply chain", "cluster", "distribution", "inventory"]):
+        role_score = 20
+        reasons.append("Adjacent operations role")
+    score += role_score
+
+    skill_groups = [
+        (["multi-site", "multi site", "multi-unit", "multi unit", "multiple locations", "multiple stores", "cluster"], 8, "Multi-site operations"),
+        (["dark store", "quick commerce", "q-commerce", "last mile", "last-mile", "fulfilment", "fulfillment", "warehouse"], 8, "Relevant fulfilment/logistics domain"),
+        (["team of", "team management", "people management", "leadership", "managed a team", "staff"], 6, "People leadership"),
+        (["sla", "service level", "kpi", "on-time", "on time", "operational excellence", "process improvement"], 5, "KPI/SLA and process ownership"),
+        (["inventory", "shrinkage", "fill rate", "cost control", "vendor management", "3pl", "capacity planning"], 5, "Inventory/cost/vendor operations"),
+    ]
+    for terms, points, reason in skill_groups:
+        if any(term in text for term in terms):
+            score += points
+            reasons.append(reason)
+
+    country = job.get("country") or detect_country(location)
+    country = detect_country(location)  # authoritative location-only classification
     countries = [str(c).lower() for c in settings.get("target_countries", DEFAULT_COUNTRIES)]
-    country_match = country.lower() in countries
-    if country_match:
-        score += 20
-        reasons.append("Target country")
+    normalized_targets = set(countries)
+    aliases = {
+        "united arab emirates": {"united arab emirates", "uae"},
+        "saudi arabia": {"saudi arabia"},
+        "india": {"india"},
+        "canada": {"canada"},
+        "qatar": {"qatar"},
+        "kuwait": {"kuwait"},
+        "oman": {"oman"},
+    }
+    if any(country.lower() in aliases.get(target, {target}) for target in normalized_targets):
+        score += 18
+        reasons.append("Confirmed target-country location")
     elif country == "Remote / Unspecified":
+        reasons.append("Location needs verification")
+    else:
+        score -= 8
+        reasons.append("Location not confirmed in target markets")
+
+    if any(x in title for x in ["senior", "lead", "head", "regional", "director", "manager", "chief"]):
         score += 8
-        reasons.append("Remote or location not clearly specified")
-    if any(x in text for x in ["senior", "lead", "head of", "regional", "director", "manager"]):
-        score += 8
-        reasons.append("Leadership-level signal")
-    if any(x in text for x in ["intern", "internship", "junior", "entry level", "graduate trainee"]):
-        score -= 25
-        reasons.append("Seniority mismatch")
-    return max(0, min(100, score)), reasons, country
+        reasons.append("Leadership seniority")
+    if any(x in title for x in ["intern", "internship", "junior", "entry level", "graduate trainee", "assistant"]):
+        score -= 18
+        reasons.append("Potential seniority mismatch")
+
+    score = max(0, min(100, score))
+    # Avoid false confidence: an unknown location cannot be classified as a top match.
+    if country in {"Unspecified", "Remote / Unspecified"}:
+        score = min(score, 64)
+    return score, reasons, country
 
 def _parse_iso(value):
     if not value:
