@@ -55,8 +55,8 @@ def stats():
     return get_stats()
 
 @app.get("/api/jobs")
-def jobs(country: str | None = None, opportunity: str | None = None, min_score: int = Query(default=0, ge=0, le=100), status: str | None = None, limit: int = Query(default=100, ge=1, le=500), offset: int = Query(default=0, ge=0)):
-    return {"items": list_jobs(country=country, opportunity=opportunity, min_score=min_score, status=status, limit=limit, offset=offset)}
+def jobs(country: str | None = None, opportunity: str | None = None, min_score: int = Query(default=0, ge=0, le=100), status: str | None = None, q: str | None = Query(default=None, max_length=120), limit: int = Query(default=100, ge=1, le=500), offset: int = Query(default=0, ge=0)):
+    return {"items": list_jobs(country=country, opportunity=opportunity, min_score=min_score, status=status, limit=limit, offset=offset, q=q)}
 
 @app.post("/api/hunt")
 async def hunt():
