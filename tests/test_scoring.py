@@ -110,3 +110,28 @@ def test_operations_cluster_role_remains_high_match():
     score, reasons, country = job_hunter.score_job(job, settings)
     assert score >= 65
     assert country == "India"
+
+
+
+def test_unrelated_technical_role_cannot_gain_score_from_generic_bonuses():
+    settings = {"target_countries": ["India", "Canada"]}
+    job = {
+        "title": "Senior Software Engineer, Edge Security",
+        "location": "Toronto, Canada",
+        "description": "Leadership, KPI ownership, SLA improvement, staff management, inventory dashboards.",
+    }
+    score, reasons, country = job_hunter.score_job(job, settings)
+    assert score <= 12
+    assert country == "Canada"
+
+
+def test_generic_program_manager_has_a_hard_score_cap():
+    settings = {"target_countries": ["Canada"]}
+    job = {
+        "title": "Senior Program Manager",
+        "location": "Toronto, Canada",
+        "description": "Leadership, KPI, SLA, team management, process improvement.",
+    }
+    score, reasons, country = job_hunter.score_job(job, settings)
+    assert score <= 24
+    assert country == "Canada"
