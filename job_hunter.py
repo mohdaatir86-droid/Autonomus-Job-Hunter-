@@ -374,41 +374,40 @@ async def fetch_public_sources(settings):
                 "India", "United Arab Emirates", "Saudi Arabia", "Qatar",
                 "Kuwait", "Oman", "Canada"
             }
+            # Rotate one role query per 15-minute scheduler slot to control API usage.
+            role = role_queries[int(datetime.now(timezone.utc).timestamp() // 900) % len(role_queries)]
             for country in settings.get("target_countries", DEFAULT_COUNTRIES):
                 if country not in allowed_countries:
                     continue
-                for role in role_queries:
-                    try:
-                        data = await _get_json(client, "https://serpapi.com/search.json", {
-                            "engine": "google_jobs", "q": role, "location": country,
-                            "api_key": serpapi_key, "hl": "en"
-                        })
-                        for row in data.get("jobs_results", [])[:min(15, limit)]:
-                            detected = row.get("detected_extensions") or {}
-                            apply_options = row.get("apply_options") or []
-                            job_url = row.get("share_link") or (
-                                apply_options[0].get("link")
-                                if apply_options and isinstance(apply_options[0], dict) else ""
-                            )
-                            if not job_url:
-                                continue
-                            item = _clean_job({
-                                "id": row.get("job_id") or job_url,
-                                "title": row.get("title"),
-                                "company": row.get("company_name"),
-                                "location": row.get("location") or country,
-                                "url": job_url,
-                                "description": row.get("description") or "",
-                                "job_type": detected.get("schedule_type", ""),
-                                "publication_date": detected.get("posted_at", ""),
-                                "salary": detected.get("salary", "")
-                            }, "Google Jobs (SerpApi)")
-                            if item:
-                                item["country"] = country
-                                results.append(item)
-                    except Exception as exc:
-                        errors.append({"source": "Google Jobs:" + country, "error": str(exc)[:300]})
-                        break
+                try:
+                    data = await _get_json(client, "https://serpapi.com/search.json", {
+                        "engine": "google_jobs", "q": role, "location": country,
+                        "api_key": serpapi_key, "hl": "en"
+                    })
+                    for row in data.get("jobs_results", [])[:min(15, limit)]:
+                        detected = row.get("detected_extensions") or {}
+                        apply_options = row.get("apply_options") or []
+                        job_url = row.get("share_link") or (
+                            apply_options[0].get("link")
+                            if apply_options and isinstance(apply_options[0], dict) else ""
+                        )
+                        if not job_url:
+                            continue
+                        item = _clean_job({
+                            "id": row.get("job_id") or job_url,
+                            "title": row.get("title"),
+                            "company": row.get("company_name"),
+                            "location": row.get("location") or country,
+                            "url": job_url,
+                            "description": row.get("description") or "",
+                            "job_type": detected.get("schedule_type", ""),
+                            "publication_date": detected.get("posted_at", ""),
+                            "salary": detected.get("salary", "")
+                        }, "Google Jobs (SerpApi)")
+                        if item:
+                            results.append(item)
+                except Exception as exc:
+                    errors.append({"source": "Google Jobs:" + country, "error": str(exc)[:300]})
         # Public company job boards configured by the operator.
         greenhouse_boards = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
         for board in greenhouse_boards[:30]:
