@@ -12,7 +12,7 @@ import httpx
 
 log = logging.getLogger("job-hunter")
 DB_PATH = os.getenv("DATABASE_PATH", "job_hunter.db")
-DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Bahrain"]
+DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman"]
 DEFAULT_TITLES = [
     "Senior Cluster Manager", "City Operations Manager", "Operations Manager",
     "Program Manager", "Head of Operations", "Warehouse Manager",
@@ -32,7 +32,6 @@ COUNTRY_ALIASES = {
     "qatar": ["qatar", "doha"],
     "kuwait": ["kuwait", "kuwait city"],
     "oman": ["oman", "muscat"],
-    "bahrain": ["bahrain", "manama"]
 }
 DEFAULT_SETTINGS = {
     "target_countries": DEFAULT_COUNTRIES,
@@ -87,9 +86,17 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         for key, value in DEFAULT_SETTINGS.items():
             conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)", (key, json.dumps(value)))
-        # Migrate the previous default profile so redeploys do not retain Canada / ₹18 LPA.
-        conn.execute("UPDATE settings SET value=? WHERE key='target_countries' AND value LIKE '%Canada%'",
-                     (json.dumps(DEFAULT_COUNTRIES),))
+        # Keep the saved profile aligned with the user's latest target-market decisions.
+        # Replace old default lists containing Canada or Bahrain; preserve custom lists otherwise.
+        row = conn.execute("SELECT value FROM settings WHERE key='target_countries'").fetchone()
+        if row:
+            try:
+                saved_countries = json.loads(row["value"])
+            except (TypeError, json.JSONDecodeError):
+                saved_countries = []
+            if any(str(country).lower() in {"canada", "bahrain"} for country in saved_countries):
+                conn.execute("UPDATE settings SET value=? WHERE key='target_countries'",
+                             (json.dumps(DEFAULT_COUNTRIES),))
         conn.execute("UPDATE settings SET value='15' WHERE key='min_india_salary_lpa' AND value='18'")
 
 def get_settings():
