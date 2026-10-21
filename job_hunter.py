@@ -222,6 +222,12 @@ def score_job(job, settings):
         reasons.append("Seniority mismatch")
 
     score = max(0, min(100, score))
+    # Enforce role-domain caps AFTER every bonus so generic keywords/location cannot
+    # turn an unrelated role into a strong match.
+    if title_is_non_ops:
+        score = min(score, 12)
+    elif generic_program_manager:
+        score = min(score, 24)
     # Avoid false confidence: an unknown location cannot be classified as a top match.
     if country in {"Unspecified", "Remote / Unspecified"}:
         score = min(score, 64)
