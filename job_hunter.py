@@ -39,7 +39,7 @@ DEFAULT_SETTINGS = {
     "target_titles": DEFAULT_TITLES,
     "min_match_score": 45,
     "max_results_per_source": 100,
-    "min_india_salary_lpa": 15,
+    "min_india_salary_lpa": 18,
     "min_experience_years": 8,
     "work_arrangement": "all",
     "posted_within_days": 1,
@@ -98,7 +98,6 @@ def init_db():
             if saved_countries == legacy_defaults:
                 conn.execute("UPDATE settings SET value=? WHERE key='target_countries'",
                              (json.dumps(DEFAULT_COUNTRIES),))
-        conn.execute("UPDATE settings SET value='15' WHERE key='min_india_salary_lpa' AND value='18'")
 
 def get_settings():
     init_db()
