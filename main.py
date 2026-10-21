@@ -59,8 +59,8 @@ def stats():
     return get_stats()
 
 @app.get("/api/jobs")
-def jobs(country: str | None = None, opportunity: str | None = None, min_score: int = Query(default=0, ge=0, le=100), status: str | None = None, q: str | None = Query(default=None, max_length=120), limit: int = Query(default=100, ge=1, le=500), offset: int = Query(default=0, ge=0)):
-    return {"items": list_jobs(country=country, opportunity=opportunity, min_score=min_score, status=status, limit=limit, offset=offset, q=q)}
+def jobs(country: str | None = None, opportunity: str | None = None, min_score: int = Query(default=70, ge=0, le=100), status: str | None = None, posted_within_days: int | None = Query(default=None, ge=1, le=365), q: str | None = Query(default=None, max_length=120), limit: int = Query(default=100, ge=1, le=500), offset: int = Query(default=0, ge=0)):
+    return {"items": list_jobs(country=country, opportunity=opportunity, min_score=min_score, status=status, posted_within_days=posted_within_days, limit=limit, offset=offset, q=q)}
 
 @app.post("/api/hunt")
 async def hunt():
@@ -72,7 +72,7 @@ def settings():
 
 @app.post("/api/settings")
 def update_settings(payload: dict[str, Any]):
-    allowed = {"target_countries", "target_titles", "min_match_score", "max_results_per_source"}
+    allowed = {"target_countries", "target_titles", "min_match_score", "max_results_per_source", "min_india_salary_lpa", "min_experience_years", "work_arrangement", "posted_within_days", "visa_preference"}
     current = get_settings()
     for key, value in payload.items():
         if key not in allowed:
@@ -89,6 +89,18 @@ def update_settings(payload: dict[str, Any]):
             if not isinstance(value, int) or isinstance(value, bool) or not 10 <= value <= 250:
                 raise HTTPException(status_code=422, detail="max_results_per_source must be an integer from 10 to 250")
             current[key] = value
+    preference_rules = {
+        "min_india_salary_lpa": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 500,
+        "min_experience_years": lambda v: isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 60,
+        "work_arrangement": lambda v: v in {"all", "onsite", "hybrid", "remote"},
+        "posted_within_days": lambda v: isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 365,
+        "visa_preference": lambda v: v in {"any", "sponsor"},
+    }
+    for key, validator in preference_rules.items():
+        if key in payload:
+            if not validator(payload[key]):
+                raise HTTPException(status_code=422, detail="Invalid value for " + key)
+            current[key] = payload[key]
     return save_settings(current)
 
 @app.post("/api/jobs/{job_id}/status")
