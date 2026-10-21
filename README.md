@@ -16,7 +16,7 @@ A deployable MVP for discovering and scoring operations leadership vacancies. Th
 
 ## Target profile defaults
 
-Countries: India, United Arab Emirates, Saudi Arabia, Qatar, Kuwait, Oman, and Canada.
+Countries: India (priority: Delhi NCR, Dehradun, and Uttar Pradesh), United Arab Emirates, Saudi Arabia, Qatar, Kuwait, and Oman. Canada is excluded.
 
 Roles: Senior Cluster Manager, City Operations Manager, Operations Manager, Program Manager, Head of Operations, Warehouse/Fulfilment Manager, Regional Operations Manager, Supply Chain Manager, Dark Store Manager, and Last-Mile Operations Manager.
 
