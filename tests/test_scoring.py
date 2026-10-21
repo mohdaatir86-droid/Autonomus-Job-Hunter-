@@ -56,3 +56,31 @@ def test_search_terms_are_supported_by_job_query(tmp_path, monkeypatch):
     assert len(found) == 1
     assert found[0]["title"] == "Senior Cluster Manager"
     assert job_hunter.list_jobs(q="accountant") == []
+
+
+
+def test_country_aliases_are_location_only():
+    cases = {
+        "Dubai, UAE": "United Arab Emirates",
+        "Riyadh, Saudi Arabia": "Saudi Arabia",
+        "Doha, Qatar": "Qatar",
+        "Muscat, Oman": "Oman",
+        "Toronto, Canada": "Canada",
+        "Noida, India": "India",
+        "Remote - Worldwide": "Remote / Unspecified",
+        "": "Unspecified",
+    }
+    for location, expected in cases.items():
+        assert job_hunter.detect_country(location) == expected
+
+
+def test_keyword_search_is_case_insensitive_and_all_terms_must_match(tmp_path, monkeypatch):
+    monkeypatch.setattr(job_hunter, "DB_PATH", str(tmp_path / "search_terms.sqlite"))
+    job_hunter.init_db()
+    with job_hunter.connect() as conn:
+        conn.execute(
+            """INSERT INTO jobs(source,title,company,location,country,url,match_score,status,first_seen_at,last_seen_at)
+               VALUES ('test','Senior Cluster Manager','Example Co','Noida, India','India','https://example.com/cluster',80,'new','2026-01-01','2026-01-01')"""
+        )
+    assert len(job_hunter.list_jobs(q="CLUSTER noida")) == 1
+    assert job_hunter.list_jobs(q="cluster Toronto") == []
