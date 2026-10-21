@@ -152,6 +152,17 @@ def score_job(job, settings):
     if role_score == 5 and any(term in title for term in ["operations", "logistics", "warehouse", "fulfil", "fulfill", "supply chain", "cluster", "distribution", "inventory"]):
         role_score = 20
         reasons.append("Adjacent operations role")
+    # Generic technical, sales, finance, HR and marketing roles are not equivalent to operations leadership.
+    domain_terms = ["warehouse", "fulfil", "fulfill", "supply chain", "logistics", "last mile", "last-mile", "dark store", "cluster", "distribution", "city operations", "store operations", "fleet", "transport", "delivery", "inventory", "quick commerce", "q-commerce"]
+    non_ops_terms = ["software", "engineer", "engineering", "security", "developer", "data science", "machine learning", "finance", "accounting", "sales", "marketing", "talent acquisition", "human resources", "hr ", "social strategy", "customer evidence", "business development"]
+    title_is_non_ops = any(term in title for term in non_ops_terms) and not any(term in title for term in domain_terms)
+    generic_program_manager = any(term in title for term in ["program manager", "programme manager"]) and not any(term in title for term in domain_terms + ["operations"])
+    if title_is_non_ops:
+        role_score = min(role_score, 8)
+        reasons = ["Title appears outside the target operations domain"]
+    elif generic_program_manager:
+        role_score = min(role_score, 16)
+        reasons = ["Program-management title lacks operations/supply-chain context"]
     score += role_score
 
     skill_groups = [
