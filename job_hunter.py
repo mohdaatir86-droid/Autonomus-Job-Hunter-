@@ -449,8 +449,15 @@ async def hunt_jobs():
     inserted = 0
     updated = 0
     with connect() as conn:
+        target_countries = set(DEFAULT_COUNTRIES)
         for job in fetched:
+            # Keep the portal focused on the user's seven requested markets only.
+            detected_country = detect_country(job.get("location", ""))
+            if detected_country not in target_countries:
+                continue
             score, reasons, country = score_job(job, settings)
+            if country not in target_countries:
+                continue
             job["match_score"] = score
             job["match_reasons"] = json.dumps(reasons, ensure_ascii=False)
             job["country"] = country
@@ -470,8 +477,10 @@ async def hunt_jobs():
 
 def list_jobs(country=None, opportunity=None, min_score=0, status=None, posted_within_days=None, limit=100, offset=0, q=None):
     init_db()
-    clauses = ["match_score >= ?"]
-    params: list[Any] = [min_score]
+    # Hide legacy or newly discovered listings outside the seven requested countries.
+    country_placeholders = ",".join("?" for _ in DEFAULT_COUNTRIES)
+    clauses = ["match_score >= ?", "country IN (" + country_placeholders + ")"]
+    params: list[Any] = [min_score, *DEFAULT_COUNTRIES]
     if country:
         clauses.append("lower(country) = lower(?)")
         params.append(country)
@@ -510,13 +519,15 @@ def list_jobs(country=None, opportunity=None, min_score=0, status=None, posted_w
 
 def get_stats():
     init_db()
+    placeholders = ",".join("?" for _ in DEFAULT_COUNTRIES)
+    allowed = tuple(DEFAULT_COUNTRIES)
     with connect() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-        new_count = conn.execute("SELECT COUNT(*) FROM jobs WHERE status='new'").fetchone()[0]
-        high = conn.execute("SELECT COUNT(*) FROM jobs WHERE match_score >= 65").fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM jobs WHERE country IN (" + placeholders + ")", allowed).fetchone()[0]
+        new_count = conn.execute("SELECT COUNT(*) FROM jobs WHERE status='new' AND country IN (" + placeholders + ")", allowed).fetchone()[0]
+        high = conn.execute("SELECT COUNT(*) FROM jobs WHERE match_score >= 65 AND country IN (" + placeholders + ")", allowed).fetchone()[0]
         last = conn.execute("SELECT * FROM hunt_runs ORDER BY id DESC LIMIT 1").fetchone()
-        by_country = [dict(row) for row in conn.execute("SELECT country, COUNT(*) AS count FROM jobs GROUP BY country ORDER BY count DESC LIMIT 12")]
-        by_source = [dict(row) for row in conn.execute("SELECT source, COUNT(*) AS count FROM jobs GROUP BY source ORDER BY count DESC")]
+        by_country = [dict(row) for row in conn.execute("SELECT country, COUNT(*) AS count FROM jobs WHERE country IN (" + placeholders + ") GROUP BY country ORDER BY count DESC", allowed)]
+        by_source = [dict(row) for row in conn.execute("SELECT source, COUNT(*) AS count FROM jobs WHERE country IN (" + placeholders + ") GROUP BY source ORDER BY count DESC", allowed)]
     return {"total_jobs": total, "new_jobs": new_count, "high_match_jobs": high, "last_run": dict(last) if last else None, "by_country": by_country, "by_source": by_source, "live_applications_enabled": False}
 
 def set_job_status(job_id, status):
