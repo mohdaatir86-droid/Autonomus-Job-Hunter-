@@ -84,3 +84,29 @@ def test_keyword_search_is_case_insensitive_and_all_terms_must_match(tmp_path, m
         )
     assert len(job_hunter.list_jobs(q="CLUSTER noida")) == 1
     assert job_hunter.list_jobs(q="cluster Toronto") == []
+
+
+
+def test_technical_program_manager_is_not_scored_as_operations_leadership():
+    settings = {"target_countries": ["India", "Canada"]}
+    job = {
+        "title": "Senior Technical Program Manager - Security",
+        "location": "USA",
+        "description": "Lead security engineering programs and technical teams.",
+    }
+    score, reasons, country = job_hunter.score_job(job, settings)
+    assert score < 35
+    assert country == "Unspecified"
+    assert any("outside the target operations domain" in reason.lower() for reason in reasons)
+
+
+def test_operations_cluster_role_remains_high_match():
+    settings = {"target_countries": ["India"]}
+    job = {
+        "title": "Senior Cluster Manager",
+        "location": "Noida, India",
+        "description": "Dark store operations, last mile, inventory, SLA, team leadership.",
+    }
+    score, reasons, country = job_hunter.score_job(job, settings)
+    assert score >= 65
+    assert country == "India"
