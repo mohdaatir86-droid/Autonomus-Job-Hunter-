@@ -6,11 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from job_hunter import hunt_jobs, get_stats, list_jobs, get_settings, save_settings, init_db, set_job_status
+from application_workflow import init_workflow_db, get_profile, save_profile, store_resume, create_application_draft, list_application_drafts, update_draft_status, get_draft_events
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("job-hunter")
@@ -18,6 +19,7 @@ log = logging.getLogger("job-hunter")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    init_workflow_db()
     if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -48,7 +50,7 @@ def root():
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
-    return {"status": "ok", "service": "autonomous-job-hunter", "time": datetime.now(timezone.utc).isoformat(), "live_applications_enabled": False}
+    return {"status": "ok", "service": "autonomous-job-hunter", "time": datetime.now(timezone.utc).isoformat(), "live_applications_enabled": False, "application_preparation_enabled": True, "resume_profile_configured": get_profile().get("has_resume", False)}
 
 @app.get("/healthz")
 def healthz():
@@ -113,6 +115,58 @@ def update_job_status(job_id: int, payload: dict[str, Any]):
     if not result.get("updated"):
         raise HTTPException(status_code=404, detail="job not found")
     return result
+
+@app.get("/api/profile")
+def candidate_profile():
+    return get_profile()
+
+@app.post("/api/profile")
+def update_candidate_profile(payload: dict[str, Any]):
+    try:
+        return save_profile(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+@app.post("/api/profile/resume")
+async def upload_resume(file: UploadFile = File(...)):
+    try:
+        content = await file.read(8 * 1024 * 1024 + 1)
+        result = store_resume(file.filename or "resume.pdf", content)
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    finally:
+        await file.close()
+
+@app.get("/api/applications")
+def application_drafts():
+    return {"items": list_application_drafts(), "automatic_submission_enabled": False}
+
+@app.post("/api/applications/draft/{job_id}")
+def prepare_application(job_id: int):
+    draft = create_application_draft(job_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="job not found")
+    return draft
+
+@app.post("/api/applications/{draft_id}/status")
+def update_application_status(draft_id: int, payload: dict[str, Any]):
+    status = str(payload.get("status", "")).strip().lower()
+    note = str(payload.get("note", ""))
+    try:
+        result = update_draft_status(draft_id, status, note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not result:
+        raise HTTPException(status_code=404, detail="application draft not found")
+    return result
+
+@app.get("/api/applications/{draft_id}/events")
+def application_events(draft_id: int):
+    events = get_draft_events(draft_id)
+    if events is None:
+        raise HTTPException(status_code=404, detail="application draft not found")
+    return {"items": events}
 
 @app.get("/api/sources")
 def sources():
