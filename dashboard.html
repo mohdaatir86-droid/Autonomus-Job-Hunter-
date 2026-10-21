@@ -66,7 +66,6 @@ async function loadDrafts(){try{var data=await api("/api/applications");var item
 async function updateDraftStatus(id,status){try{await api("/api/applications/"+id+"/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:status})});await loadDrafts()}catch(e){showError("Could not update application status: "+e.message)}}
 async function copyText(value){try{await navigator.clipboard.writeText(value);document.getElementById("profileMsg").textContent="Cover letter copied"}catch(e){window.prompt("Copy cover letter text:",value)}}
 
-Promise.all([loadProfile(),loadDrafts()]);
 loadAll();
 </script>
 </body></html>
