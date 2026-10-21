@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autonomous Job Hunter</title>
+<style>
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;color:#172033;background:#f5f7fb}
+*{box-sizing:border-box}body{margin:0}header{background:#101828;color:white;padding:24px clamp(16px,4vw,48px);display:flex;justify-content:space-between;gap:18px;align-items:center;flex-wrap:wrap}
+h1{font-size:clamp(22px,3vw,32px);margin:0 0 6px}header p{margin:0;color:#cbd5e1}.wrap{max-width:1400px;margin:auto;padding:24px clamp(14px,3vw,36px)}
+button,select,input{font:inherit;border:1px solid #d0d5dd;border-radius:10px;padding:10px 12px;background:white;color:#172033}button{cursor:pointer;font-weight:650}button.primary{background:#2563eb;color:white;border-color:#2563eb}button:disabled{opacity:.6;cursor:wait}.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:20px}.card{background:white;border:1px solid #e4e7ec;border-radius:16px;padding:18px;box-shadow:0 2px 8px #10182808}.muted{color:#667085}.number{font-size:30px;font-weight:750;margin-top:6px}.filters{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}.filters select,.filters input{min-width:155px}.panel{background:white;border:1px solid #e4e7ec;border-radius:16px;overflow:hidden}.panelhead{padding:18px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #eaecf0}h2{font-size:18px;margin:0}.tablewrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:900px}th,td{text-align:left;padding:13px 16px;border-bottom:1px solid #f0f2f5;vertical-align:top}th{font-size:12px;color:#667085;text-transform:uppercase;letter-spacing:.04em;background:#fafbfc}td{font-size:14px}.jobtitle{font-weight:700;color:#1d2939;text-decoration:none}.jobtitle:hover{color:#2563eb}.pill{display:inline-block;padding:4px 8px;border-radius:99px;background:#eef4ff;color:#1849a9;font-size:12px;font-weight:700}.score{font-weight:800}.error{color:#b42318;padding:12px 18px}.empty{padding:40px;text-align:center;color:#667085}.footer{color:#667085;font-size:12px;margin:18px 0}.status{max-width:160px}
+@media(max-width:760px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.number{font-size:25px}header{align-items:flex-start}.wrap{padding-top:16px}.card{padding:14px}}
+</style>
+</head>
+<body>
+<header><div><h1>Autonomous Job Hunter</h1><p>Operations leadership opportunities · India and international markets</p></div><button id="hunt" class="primary" onclick="runHunt()">↻ Hunt now</button></header>
+<main class="wrap">
+<div class="cards">
+<div class="card"><div class="muted">Jobs discovered</div><div id="total" class="number">—</div></div>
+<div class="card"><div class="muted">New jobs</div><div id="new" class="number">—</div></div>
+<div class="card"><div class="muted">Strong matches (65+)</div><div id="high" class="number">—</div></div>
+<div class="card"><div class="muted">Last discovery run</div><div id="last" style="font-weight:700;margin-top:12px">Not run yet</div></div>
+</div>
+<div class="filters">
+<select id="country"><option value="">All target countries</option><option>India</option><option>United Arab Emirates</option><option>Saudi Arabia</option><option>Qatar</option><option>Kuwait</option><option>Oman</option><option>Canada</option><option>Remote / Unspecified</option></select>
+<select id="score"><option value="0">Any match score</option><option value="35">35+ match</option><option value="50">50+ match</option><option value="65">65+ strong match</option><option value="80">80+ top match</option></select>
+<select id="status"><option value="">All statuses</option><option value="new">New</option><option value="saved">Saved</option><option value="applied_manually">Applied manually</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Rejected</option><option value="not_relevant">Not relevant</option></select>
+<button onclick="loadJobs()">Apply filters</button><button onclick="loadAll()">Refresh</button>
+</div>
+<section class="panel"><div class="panelhead"><div><h2>Matched vacancies</h2><div id="subtitle" class="muted" style="font-size:13px;margin-top:5px">Loading jobs…</div></div><a href="/docs">API docs ↗</a></div><div id="error"></div><div class="tablewrap"><table><thead><tr><th>Role / Company</th><th>Location</th><th>Match</th><th>Source</th><th>First seen</th><th>Application status</th></tr></thead><tbody id="rows"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody></table></div></section>
+<div class="footer">Discovery only: applications are not submitted automatically. Review job details and employer requirements before applying. Results depend on public source coverage.</div>
+</main>
+<script>
+function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
+async function api(url,opts){var r=await fetch(url,opts||{});if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}
+function niceDate(v){if(!v)return "—";var d=new Date(v);return isNaN(d.getTime())?esc(v):d.toLocaleDateString()}
+async function loadStats(){try{var s=await api("/api/stats");document.getElementById("total").textContent=s.total_jobs;document.getElementById("new").textContent=s.new_jobs;document.getElementById("high").textContent=s.high_match_jobs;document.getElementById("last").textContent=s.last_run?niceDate(s.last_run.finished_at):"Not run yet"}catch(e){showError("Could not load statistics: "+e.message)}}
+async function loadJobs(){var q=new URLSearchParams();if(document.getElementById("country").value)q.set("country",document.getElementById("country").value);q.set("min_score",document.getElementById("score").value);if(document.getElementById("status").value)q.set("status",document.getElementById("status").value);q.set("limit","250");try{var data=await api("/api/jobs?"+q.toString());var jobs=data.items||[];document.getElementById("subtitle").textContent=jobs.length+" vacancies shown · sorted by match score";var body=document.getElementById("rows");if(!jobs.length){body.innerHTML='<tr><td colspan="6" class="empty">No matching jobs yet. Click “Hunt now” to fetch listings, or lower the match score.</td></tr>';return}body.innerHTML=jobs.map(function(j){var reasons=(j.match_reasons||[]).join(" · ");return '<tr><td><a class="jobtitle" target="_blank" rel="noopener noreferrer" href="'+esc(j.url)+'">'+esc(j.title)+'</a><div style="margin-top:5px">'+esc(j.company||"Company not listed")+'</div><div class="muted" style="font-size:12px;margin-top:4px">'+esc(reasons)+'</div></td><td>'+esc(j.location||"Unspecified")+'<div class="muted">'+esc(j.country)+'</div></td><td><span class="pill">'+esc(j.match_score)+'/100</span></td><td>'+esc(j.source)+'</td><td>'+niceDate(j.first_seen_at)+'</td><td><select class="status" onchange="setStatus('+Number(j.id)+',this.value)">'+statusOptions(j.status)+'</select></td></tr>'}).join("")}catch(e){showError("Could not load jobs: "+e.message)}}
+function statusOptions(current){return [["new","New"],["saved","Saved"],["applied_manually","Applied manually"],["interview","Interview"],["offer","Offer"],["rejected","Rejected"],["not_relevant","Not relevant"]].map(function(x){return '<option value="'+x[0]+'" '+(current===x[0]?"selected":"")+'>'+x[1]+'</option>'}).join("")}
+function showError(msg){document.getElementById("error").innerHTML='<div class="error">'+esc(msg)+'</div>'}
+async function setStatus(id,status){try{await api("/api/jobs/"+id+"/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:status})});await loadStats()}catch(e){showError("Could not update status: "+e.message)}}
+async function runHunt(){var b=document.getElementById("hunt");b.disabled=true;b.textContent="Hunting…";document.getElementById("error").innerHTML="";try{var r=await api("/api/hunt",{method:"POST"});if(r.errors&&r.errors.length)showError("Hunt completed with "+r.errors.length+" source error(s). Open API docs or logs for details.");await loadAll()}catch(e){showError("Hunt failed: "+e.message)}finally{b.disabled=false;b.textContent="↻ Hunt now"}}
+async function loadAll(){await Promise.all([loadStats(),loadJobs()])}
+loadAll();
+</script>
+</body></html>
