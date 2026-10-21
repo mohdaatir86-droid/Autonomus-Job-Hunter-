@@ -9,8 +9,8 @@ A deployable MVP for discovering and scoring operations leadership vacancies. Th
 - Normalizes job records and deduplicates them by job URL.
 - Scores jobs against operations, fulfilment, warehouse, supply chain, quick-commerce and cluster-management roles.
 - Filters and ranks by target country and match score.
-- Stores job records, first/last seen timestamps, run history, and manually maintained application status in SQLite.
-- Provides a JSON API and interactive API documentation at /docs.
+- Stores job records, first/last seen timestamps, run history, and manually maintained application status in SQLite when the configured database path is persistent.
+- Provides a responsive dashboard, JSON API, keyword search, country/source coverage, and interactive API documentation at /docs.
 - Runs scheduled discovery every 15 minutes by default.
 - Includes Render Blueprint and persistent-disk configuration.
 
@@ -63,7 +63,7 @@ Optional company board slugs can be set as comma-separated environment variables
 
 If your Render plan does not support persistent disks, use managed PostgreSQL before relying on long-term tracking.
 
-## Important limits and safety
+## Storage warning for the current Render service\n\nThe existing `autonomous-job-hunter` service is on Render Free and currently uses `DATABASE_PATH=job_hunter.db` without a mounted persistent disk. Its SQLite database is on the ephemeral filesystem and can be lost on restart/redeploy. The repo includes persistent-disk Blueprint configuration, but the live service was created directly and does not automatically inherit that disk. Do not treat saved application status/history as durable until persistent storage is attached or a managed database is configured.\n\n## Important limits and safety
 
 - **Application submission is disabled.** The service finds, scores and tracks vacancies; it does not log into job sites or submit applications.
 - No CAPTCHA/OTP bypass, fabricated answers, or automatic acceptance of legal declarations is implemented.
@@ -77,6 +77,6 @@ If your Render plan does not support persistent disks, use managed PostgreSQL be
 
 1. Add robust country/remote parsing and country-specific salary/work-authorization preferences.
 2. Add automated tests, provider health metrics, retry/backoff, and alerting.
-3. Add a frontend dashboard for filters, job details, saved jobs, and run status.
+3. Verify and configure persistent storage for the currently deployed Render service before relying on long-term tracking.
 4. Add ranking history snapshots and meaningful freshness/velocity metrics.
 5. Add permitted application preparation/submission only after candidate profile and each source's rules are validated.
