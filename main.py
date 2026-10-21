@@ -39,16 +39,20 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Autonomous Job Hunter", version="0.1.0", description="Job discovery, deduplication, candidate matching and application tracking. Submission is intentionally disabled by default.", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "*").split(","), allow_credentials=False, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     dashboard = Path(__file__).with_name("dashboard.html")
     if dashboard.exists():
         return FileResponse(dashboard)
     return {"name": "Autonomous Job Hunter", "status": "ready", "version": app.version, "docs": "/docs", "health": "/health"}
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok", "service": "autonomous-job-hunter", "time": datetime.now(timezone.utc).isoformat(), "live_applications_enabled": False}
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok", "service": "autonomous-job-hunter"}
 
 @app.get("/api/stats")
 def stats():
@@ -71,7 +75,19 @@ def update_settings(payload: dict[str, Any]):
     allowed = {"target_countries", "target_titles", "min_match_score", "max_results_per_source"}
     current = get_settings()
     for key, value in payload.items():
-        if key in allowed:
+        if key not in allowed:
+            continue
+        if key in {"target_countries", "target_titles"}:
+            if not isinstance(value, list) or not value or not all(isinstance(item, str) and item.strip() for item in value):
+                raise HTTPException(status_code=422, detail=key + " must be a non-empty list of strings")
+            current[key] = list(dict.fromkeys(item.strip() for item in value if item.strip()))
+        elif key == "min_match_score":
+            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 100:
+                raise HTTPException(status_code=422, detail="min_match_score must be an integer from 0 to 100")
+            current[key] = value
+        elif key == "max_results_per_source":
+            if not isinstance(value, int) or isinstance(value, bool) or not 10 <= value <= 250:
+                raise HTTPException(status_code=422, detail="max_results_per_source must be an integer from 10 to 250")
             current[key] = value
     return save_settings(current)
 
