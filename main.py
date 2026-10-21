@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
             minutes = max(15, int(os.getenv("HUNT_INTERVAL_MINUTES", "15")))
             async def scheduled_hunt():
                 await hunt_jobs()
-            scheduler.add_job(scheduled_hunt, "interval", minutes=minutes, id="job-hunt", replace_existing=True, max_instances=1, coalesce=True)
+            scheduler.add_job(scheduled_hunt, "interval", minutes=minutes, id="job-hunt", replace_existing=True, max_instances=1, coalesce=True, next_run_time=datetime.now(timezone.utc))
             scheduler.start()
             app.state.scheduler = scheduler
             log.info("Job discovery scheduler started; interval=%s minutes", minutes)
