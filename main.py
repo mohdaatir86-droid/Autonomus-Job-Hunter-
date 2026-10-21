@@ -187,9 +187,14 @@ def application_events(draft_id: int):
 @app.get("/api/sources")
 def sources():
     return {"sources": [
-        {"name": "Arbeitnow", "type": "public API", "configured": True},
-        {"name": "Remotive", "type": "public API", "configured": True},
-        {"name": "Jobicy", "type": "public API", "configured": True},
-        {"name": "Greenhouse", "type": "public job boards", "configured": bool(os.getenv("GREENHOUSE_BOARDS", ""))},
-        {"name": "Lever", "type": "public job boards", "configured": bool(os.getenv("LEVER_SITES", ""))}
-    ], "note": "Results depend on what each provider exposes. Search frequency respects provider limits; this is not exhaustive coverage of every job board."}
+        {"name": "Arbeitnow", "type": "Public job API", "configured": True, "connection_mode": "API"},
+        {"name": "Remotive", "type": "Public job API", "configured": True, "connection_mode": "API"},
+        {"name": "Jobicy", "type": "Public job API", "configured": True, "connection_mode": "API"},
+        {"name": "Google Jobs via SerpApi", "type": "Search API", "configured": bool(os.getenv("SERPAPI_API_KEY", "").strip()), "connection_mode": "API key required"},
+        {"name": "Greenhouse company boards", "type": "Public company ATS API", "configured": bool(os.getenv("GREENHOUSE_BOARDS", "").strip()), "connection_mode": "Company board slugs"},
+        {"name": "Lever company boards", "type": "Public company ATS API", "configured": bool(os.getenv("LEVER_SITES", "").strip()), "connection_mode": "Company board slugs"},
+        {"name": "Naukri", "type": "Job board", "configured": False, "connection_mode": "Official integration or job-alert email required"},
+        {"name": "Shine", "type": "Job board", "configured": False, "connection_mode": "Official integration or job-alert email required"},
+        {"name": "Monster", "type": "Job board", "configured": False, "connection_mode": "Official integration or job-alert email required"},
+        {"name": "LinkedIn", "type": "Job board", "configured": False, "connection_mode": "Authorized API/partner access required"}
+    ], "note": "No portal passwords are stored. Naukri, Shine, Monster and LinkedIn are not connected until an authorized integration is configured. Direct application submission remains disabled."}
