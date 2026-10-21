@@ -12,7 +12,7 @@ button,select,input{font:inherit;border:1px solid #d0d5dd;border-radius:10px;pad
 </style>
 </head>
 <body>
-<header><div><h1>Autonomous Job Hunter</h1><p>Operations leadership · ₹18 LPA India target · 8+ years · 70+ match score</p></div><button id="hunt" class="primary" onclick="runHunt()">↻ Hunt now</button></header>
+<header><div><h1>Autonomous Job Hunter</h1><p>Operations leadership · ₹15 LPA India minimum · ₹17 LPA preferred · 8+ years · 70+ match score</p></div><button id="hunt" class="primary" onclick="runHunt()">↻ Hunt now</button></header>
 <main class="wrap">
 <div class="cards">
 <div class="card"><div class="muted">Jobs discovered</div><div id="total" class="number">—</div></div>
@@ -23,14 +23,14 @@ button,select,input{font:inherit;border:1px solid #d0d5dd;border-radius:10px;pad
 <div class="coverage"><div class="card"><h2>Country coverage</h2><div id="countryCoverage" class="coverage-list"><span class="muted">Loading…</span></div></div><div class="card"><h2>Source coverage</h2><div id="sourceCoverage" class="coverage-list"><span class="muted">Loading…</span></div></div></div>
 <div class="filters">
 <input id="search" type="search" placeholder="Search role, company or city" aria-label="Search role, company or city" onkeydown="if(event.key==='Enter')loadJobs()">
-<select id="country"><option value="">All target countries</option><option>India</option><option>United Arab Emirates</option><option>Saudi Arabia</option><option>Qatar</option><option>Kuwait</option><option>Oman</option><option>Canada</option><option>Remote / Unspecified</option></select>
+<select id="country"><option value="">All target countries</option><option>India</option><option>United Arab Emirates</option><option>Saudi Arabia</option><option>Qatar</option><option>Kuwait</option><option>Oman</option><option>Bahrain</option><option>Remote / Unspecified</option></select>
 <select id="score"><option value="70" selected>AI match score (70+)</option><option value="0">Any match score</option><option value="50">50+ match</option><option value="65">65+ strong match</option><option value="80">80+ top match</option></select>
 <select id="posted"><option value="1" selected>Posted in last 24 hours</option><option value="3">Posted in last 3 days</option><option value="7">Posted in last 7 days</option><option value="">Any posting date</option></select>
 <select id="status"><option value="">All statuses</option><option value="new">New</option><option value="saved">Saved</option><option value="applied_manually">Applied manually</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Rejected</option><option value="not_relevant">Not relevant</option></select>
 <button onclick="loadJobs()">Apply filters</button><button onclick="loadAll()">Refresh</button>
 </div>
 <section class="panel"><div class="panelhead"><div><h2>Matched vacancies</h2><div id="subtitle" class="muted" style="font-size:13px;margin-top:5px">Loading jobs…</div></div><a href="/docs">API docs ↗</a></div><div id="error"></div><div class="tablewrap"><table><thead><tr><th>Role / Company</th><th>Location</th><th>Match</th><th>Source</th><th>First seen</th><th>Application status</th></tr></thead><tbody id="rows"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody></table></div></section>
-<div class="footer">Profile target: India minimum ₹18 LPA; 8+ relevant years; all work arrangements; jobs posted within 24 hours by default; international visa preference unrestricted. Salary, experience and sponsorship must be verified from each listing.<br><br>Discovery only: applications are not submitted automatically. Review job details and employer requirements before applying. Results depend on public source coverage.</div>
+<div class="footer">Profile target: India minimum ₹15 LPA (₹17 LPA preferred); focus on Delhi NCR, Dehradun and Uttar Pradesh; Gulf international roles only; 8+ relevant years; all work arrangements; jobs posted within 24 hours by default. Salary, experience and sponsorship must be verified from each listing.<br><br>Discovery only: applications are not submitted automatically. Current connected sources are public job APIs and configured employer boards; Naukri, NaukriGulf, Shine, Monster and LinkedIn are not yet confirmed as live integrations. Review job details and employer requirements before applying.</div>
 </main>
 <script>
 function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
