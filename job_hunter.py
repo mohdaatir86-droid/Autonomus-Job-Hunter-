@@ -12,7 +12,7 @@ import httpx
 
 log = logging.getLogger("job-hunter")
 DB_PATH = os.getenv("DATABASE_PATH", "job_hunter.db")
-DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman"]
+DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"]
 DEFAULT_TITLES = [
     "Senior Cluster Manager", "City Operations Manager", "Operations Manager",
     "Program Manager", "Head of Operations", "Warehouse Manager",
@@ -32,6 +32,7 @@ COUNTRY_ALIASES = {
     "qatar": ["qatar", "doha"],
     "kuwait": ["kuwait", "kuwait city"],
     "oman": ["oman", "muscat"],
+    "canada": ["canada", "toronto", "vancouver", "montreal", "calgary", "ottawa", "edmonton"],
 }
 DEFAULT_SETTINGS = {
     "target_countries": DEFAULT_COUNTRIES,
@@ -86,15 +87,15 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         for key, value in DEFAULT_SETTINGS.items():
             conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)", (key, json.dumps(value)))
-        # Keep the saved profile aligned with the user's latest target-market decisions.
-        # Replace old default lists containing Canada or Bahrain; preserve custom lists otherwise.
+        # Migrate only the previous shipped default list; preserve customized countries.
         row = conn.execute("SELECT value FROM settings WHERE key='target_countries'").fetchone()
         if row:
             try:
                 saved_countries = json.loads(row["value"])
             except (TypeError, json.JSONDecodeError):
                 saved_countries = []
-            if any(str(country).lower() in {"canada", "bahrain"} for country in saved_countries):
+            legacy_defaults = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman"]
+            if saved_countries == legacy_defaults:
                 conn.execute("UPDATE settings SET value=? WHERE key='target_countries'",
                              (json.dumps(DEFAULT_COUNTRIES),))
         conn.execute("UPDATE settings SET value='15' WHERE key='min_india_salary_lpa' AND value='18'")
@@ -129,6 +130,7 @@ def detect_country(location, title="", description=""):
         ("Qatar", ["qatar", "doha"]),
         ("Kuwait", ["kuwait", "kuwait city"]),
         ("Oman", ["oman", "muscat", "salalah"]),
+        ("Canada", ["canada", "toronto", "vancouver", "montreal", "calgary", "ottawa", "edmonton", "winnipeg", "quebec city"]),
         ("Bahrain", ["bahrain", "manama"]),
         ("India", ["india", "new delhi", "delhi", "gurugram", "gurgaon", "noida", "mumbai", "bengaluru", "bangalore", "hyderabad", "pune", "chennai", "faridabad", "jaipur", "lucknow"]),
         ("United States", ["united states", "united states of america", "usa", "u.s.a.", "new york", "san francisco", "seattle", "austin", "boston", "los angeles", "chicago", "denver"]),
@@ -220,6 +222,7 @@ def score_job(job, settings):
         "qatar": {"qatar"},
         "kuwait": {"kuwait"},
         "oman": {"oman"},
+        "canada": {"canada"},
     }
     if any(country.lower() in aliases.get(target, {target}) for target in normalized_targets):
         score += 18
