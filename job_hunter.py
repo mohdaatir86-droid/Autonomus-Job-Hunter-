@@ -15,14 +15,14 @@ DEFAULT_TITLES = [
     "Operations Manager", "Head of Operations", "Regional Operations Manager",
     "Warehouse Manager", "Fulfilment Manager", "Fulfillment Manager",
     "Dark Store Manager", "Supply Chain Manager", "Last Mile Operations Manager",
-    "QSR Operations Manager", "Multi-Unit Operations Manager", "Area Operations Manager"
+    "QSR Operations Manager", "Multi-Unit Operations Manager", "Area Operations Manager",
 ]
 DEFAULT_SKILLS = [
     "operations", "cluster management", "city operations", "warehouse", "fulfilment",
     "fulfillment", "supply chain", "quick commerce", "q-commerce", "dark store",
     "last mile", "logistics", "inventory", "sla", "kpi", "multi-unit", "team leadership",
     "store launch", "vendor management", "3pl", "process improvement", "qsr operations",
-    "multi-unit management", "shrinkage control", "order fulfillment", "pre-launch readiness"
+    "multi-unit management", "shrinkage control", "order fulfillment", "pre-launch readiness",
 ]
 DEFAULT_SETTINGS = {
     "target_countries": DEFAULT_COUNTRIES,
@@ -33,11 +33,13 @@ DEFAULT_SETTINGS = {
     "min_experience_years": 8,
     "work_arrangement": "all",
     "posted_within_days": 3,
-    "visa_preference": "any"
+    "visa_preference": "any",
 }
+
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
+
 
 def connect():
     db_path = Path(DB_PATH)
@@ -48,6 +50,7 @@ def connect():
     conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
 
 def init_db():
     with connect() as conn:
@@ -61,7 +64,10 @@ def init_db():
         )""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_score ON jobs(match_score DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_country ON jobs(country)")
-        conn.execute("CREATE TABLE IF NOT EXISTS hunt_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT, finished_at TEXT, sources_checked INTEGER, fetched INTEGER, new_jobs INTEGER, errors TEXT)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS hunt_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT, finished_at TEXT,
+            sources_checked INTEGER, fetched INTEGER, new_jobs INTEGER, errors TEXT
+        )""")
         conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         for key, value in DEFAULT_SETTINGS.items():
             conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)", (key, json.dumps(value)))
@@ -71,25 +77,42 @@ def init_db():
                 saved = json.loads(row["value"])
             except (TypeError, json.JSONDecodeError):
                 saved = []
-            if "Canada" in saved and set(saved) <= {"India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"}:
-                conn.execute("UPDATE settings SET value=? WHERE key='target_countries'", (json.dumps(DEFAULT_COUNTRIES),))
+            if "Canada" in saved and set(saved) <= {
+                "India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"
+            }:
+                conn.execute(
+                    "UPDATE settings SET value=? WHERE key='target_countries'",
+                    (json.dumps(DEFAULT_COUNTRIES),),
+                )
+
 
 def get_settings():
     init_db()
     with connect() as conn:
         values = {row["key"]: json.loads(row["value"]) for row in conn.execute("SELECT key,value FROM settings")}
-    return {**DEFAULT_SETTINGS, **values, "live_applications_enabled": False, "hunt_interval_minutes": max(15, int(os.getenv("HUNT_INTERVAL_MINUTES", "15")))}
+    return {
+        **DEFAULT_SETTINGS,
+        **values,
+        "live_applications_enabled": False,
+        "hunt_interval_minutes": max(15, int(os.getenv("HUNT_INTERVAL_MINUTES", "15"))),
+    }
+
 
 def save_settings(values):
     init_db()
     with connect() as conn:
         for key in DEFAULT_SETTINGS:
             if key in values:
-                conn.execute("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, json.dumps(values[key])))
+                conn.execute(
+                    "INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (key, json.dumps(values[key])),
+                )
     return get_settings()
+
 
 def normalize_text(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
 
 def detect_country(location, title="", description=""):
     loc = normalize_text(location).lower()
@@ -98,14 +121,16 @@ def detect_country(location, title="", description=""):
     aliases = [
         ("United Arab Emirates", ["united arab emirates", "uae", "dubai", "abu dhabi", "sharjah", "ajman", "ras al khaimah"]),
         ("Saudi Arabia", ["saudi arabia", "riyadh", "jeddah", "dammam", "khobar", "mecca", "makkah", "medina", "madinah"]),
-        ("Qatar", ["qatar", "doha"]), ("Kuwait", ["kuwait", "kuwait city"]),
+        ("Qatar", ["qatar", "doha"]),
+        ("Kuwait", ["kuwait", "kuwait city"]),
         ("Oman", ["oman", "muscat", "salalah"]),
         ("Canada", ["canada", "toronto", "vancouver", "montreal", "calgary", "ottawa", "edmonton"]),
         ("Bahrain", ["bahrain", "manama"]),
         ("India", ["india", "new delhi", "delhi", "gurugram", "gurgaon", "noida", "mumbai", "bengaluru", "bangalore", "hyderabad", "pune", "chennai", "faridabad", "jaipur", "lucknow"]),
         ("United States", ["united states", "usa", "u.s.a.", "new york", "san francisco", "seattle", "austin"]),
         ("United Kingdom", ["united kingdom", "uk", "london", "manchester"]),
-        ("Singapore", ["singapore"]), ("Germany", ["germany", "berlin", "munich"]),
+        ("Singapore", ["singapore"]),
+        ("Germany", ["germany", "berlin", "munich"]),
         ("Australia", ["australia", "sydney", "melbourne"]),
     ]
     padded = " " + re.sub(r"[^a-z0-9]+", " ", loc).strip() + " "
@@ -117,6 +142,7 @@ def detect_country(location, title="", description=""):
     if any(x in loc for x in ["remote", "worldwide", "anywhere", "work from home", "distributed"]):
         return "Remote / Unspecified"
     return "Unspecified"
+
 
 def score_job(job, settings):
     title = normalize_text(job.get("title")).lower()
@@ -139,13 +165,26 @@ def score_job(job, settings):
             role_score = max(role_score, points)
             reasons.append("Target role: " + reason)
             break
-    if role_score == 5 and any(term in title for term in ["operations", "logistics", "warehouse", "fulfil", "fulfill", "supply chain", "cluster", "distribution", "inventory"]):
+    if role_score == 5 and any(
+        term in title
+        for term in ["operations", "logistics", "warehouse", "fulfil", "fulfill", "supply chain", "cluster", "distribution", "inventory"]
+    ):
         role_score = 20
         reasons.append("Adjacent operations role")
-    domain_terms = ["warehouse", "fulfil", "fulfill", "supply chain", "logistics", "last mile", "last-mile", "dark store", "cluster", "distribution", "city operations", "store operations", "fleet", "delivery", "inventory", "quick commerce", "q-commerce"]
-    non_ops_terms = ["software", "engineer", "engineering", "security", "developer", "data science", "machine learning", "finance", "accounting", "sales", "marketing", "talent acquisition", "human resources", "hr "]
+    domain_terms = [
+        "warehouse", "fulfil", "fulfill", "supply chain", "logistics", "last mile", "last-mile",
+        "dark store", "cluster", "distribution", "city operations", "store operations", "fleet",
+        "delivery", "inventory", "quick commerce", "q-commerce",
+    ]
+    non_ops_terms = [
+        "software", "engineer", "engineering", "security", "developer", "data science",
+        "machine learning", "finance", "accounting", "sales", "marketing",
+        "talent acquisition", "human resources", "hr ",
+    ]
     title_is_non_ops = any(term in title for term in non_ops_terms) and not any(term in title for term in domain_terms)
-    generic_program_manager = any(term in title for term in ["program manager", "programme manager"]) and not any(term in title for term in domain_terms + ["operations"])
+    generic_program_manager = any(term in title for term in ["program manager", "programme manager"]) and not any(
+        term in title for term in domain_terms + ["operations"]
+    )
     if title_is_non_ops:
         role_score = min(role_score, 8)
         reasons = ["Title appears outside the target operations domain"]
@@ -166,7 +205,16 @@ def score_job(job, settings):
             reasons.append(reason)
     country = detect_country(location)
     countries = [str(c).lower() for c in settings.get("target_countries", DEFAULT_COUNTRIES)]
-    aliases = {"united arab emirates": {"united arab emirates", "uae"}, "saudi arabia": {"saudi arabia"}, "india": {"india"}, "bahrain": {"bahrain"}, "qatar": {"qatar"}, "kuwait": {"kuwait"}, "oman": {"oman"}, "canada": {"canada"}}
+    aliases = {
+        "united arab emirates": {"united arab emirates", "uae"},
+        "saudi arabia": {"saudi arabia"},
+        "india": {"india"},
+        "bahrain": {"bahrain"},
+        "qatar": {"qatar"},
+        "kuwait": {"kuwait"},
+        "oman": {"oman"},
+        "canada": {"canada"},
+    }
     if any(country.lower() in aliases.get(target, {target}) for target in countries):
         score += 18
         reasons.append("Confirmed target-country location")
@@ -189,16 +237,3 @@ def score_job(job, settings):
     if country in {"Unspecified", "Remote / Unspecified"}:
         score = min(score, 64)
     return score, reasons, country
-
-# Re-export hunt helpers from job_sources when available (full fetch module)
-try:
-    from job_sources import hunt_jobs, list_jobs, get_stats, set_job_status
-except ImportError:
-    async def hunt_jobs():
-        return {"status": "error", "detail": "job_sources module missing", "live_applications_enabled": False}
-    def list_jobs(**kwargs):
-        return []
-    def get_stats():
-        return {"total_jobs": 0, "new_jobs": 0, "high_match_jobs": 0, "last_run": None, "by_country": [], "by_source": [], "live_applications_enabled": False}
-    def set_job_status(job_id, status):
-        return {"updated": False, "error": "job_sources module missing"}
