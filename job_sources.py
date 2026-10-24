@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote_plus
 
 import httpx
 
@@ -22,8 +24,20 @@ from job_hunter import (
 
 log = logging.getLogger("job-hunter")
 
-# Countries allowed in list/stats by default (target markets + unspecified for review)
 LISTABLE_COUNTRIES = list(DEFAULT_COUNTRIES) + ["Remote / Unspecified", "Unspecified"]
+
+SERPAPI_QUERIES = [
+    "Cluster Manager India",
+    "Operations Manager QSR India",
+    "Dark Store Manager India",
+    "City Operations Manager India",
+    "Warehouse Manager India",
+    "Cluster Manager UAE OR Dubai OR \"Saudi Arabia\" OR Qatar",
+    "Operations Manager Gulf OR UAE OR Riyadh",
+    "Multi Unit Operations Manager India",
+    "Fulfilment Manager India OR UAE",
+    "Q-commerce Operations Manager India",
+]
 
 
 def _parse_iso(value):
@@ -47,14 +61,26 @@ def _parse_iso(value):
 
 
 def _job_url(job):
-    url = normalize_text(job.get("url") or job.get("job_url") or job.get("apply_url"))
+    url = normalize_text(job.get("url") or job.get("job_url") or job.get("apply_url") or job.get("link"))
     if not url.startswith(("http://", "https://")):
         return ""
     return url
 
 
+def _extract_posted(raw):
+    ext = raw.get("detected_extensions")
+    if isinstance(ext, dict) and ext.get("posted_at"):
+        return ext.get("posted_at")
+    return (
+        raw.get("publication_date")
+        or raw.get("published_at")
+        or raw.get("createdAt")
+        or raw.get("date")
+    )
+
+
 def _clean_job(raw, source):
-    title = normalize_text(raw.get("title") or raw.get("position"))
+    title = normalize_text(raw.get("title") or raw.get("position") or raw.get("name"))
     company_obj = raw.get("company")
     company = normalize_text(
         company_obj.get("name")
@@ -82,6 +108,7 @@ def _clean_job(raw, source):
                 or raw.get("descriptionPlain")
                 or raw.get("jobDescription")
                 or raw.get("snippet")
+                or raw.get("description_text")
                 or ""
             ),
         )
@@ -91,7 +118,7 @@ def _clean_job(raw, source):
         return None
     return {
         "source": source,
-        "source_id": str(raw.get("id") or raw.get("slug") or ""),
+        "source_id": str(raw.get("id") or raw.get("slug") or raw.get("job_id") or "")[:120],
         "title": title[:300],
         "company": company[:300],
         "location": location[:300],
@@ -102,50 +129,208 @@ def _clean_job(raw, source):
             raw.get("job_type") or raw.get("employment_type") or raw.get("contractType") or raw.get("type")
         )[:100],
         "salary": normalize_text(raw.get("salary") or raw.get("salaryRange") or raw.get("salary_range"))[:200],
-        "posted_at": _parse_iso(
-            raw.get("publication_date") or raw.get("published_at") or raw.get("createdAt") or raw.get("date")
-        ),
+        "posted_at": _parse_iso(_extract_posted(raw)),
         "raw_json": json.dumps(raw, ensure_ascii=False)[:20000],
     }
 
 
 async def _get_json(client, url, params=None):
-    response = await client.get(url, params=params, timeout=25, follow_redirects=True)
+    response = await client.get(url, params=params, timeout=30, follow_redirects=True)
     response.raise_for_status()
     return response.json()
+
+
+async def fetch_arbeitnow(client, limit):
+    data = await _get_json(client, "https://www.arbeitnow.com/api/job-board-api")
+    out = []
+    for raw in (data.get("data") or data.get("jobs") or [])[:limit]:
+        job = _clean_job(raw if isinstance(raw, dict) else {}, "Arbeitnow")
+        if job:
+            out.append(job)
+    return out
+
+
+async def fetch_remotive(client, limit):
+    data = await _get_json(client, "https://remotive.com/api/remote-jobs")
+    out = []
+    for raw in (data.get("jobs") or [])[:limit]:
+        job = _clean_job(raw if isinstance(raw, dict) else {}, "Remotive")
+        if job:
+            out.append(job)
+    return out
+
+
+async def fetch_jobicy(client, limit):
+    data = await _get_json(client, "https://jobicy.com/api/v2/remote-jobs", params={"count": limit})
+    out = []
+    for raw in (data.get("jobs") or [])[:limit]:
+        job = _clean_job(raw if isinstance(raw, dict) else {}, "Jobicy")
+        if job:
+            out.append(job)
+    return out
+
+
+async def fetch_serpapi_google_jobs(client, limit):
+    """Google Jobs via SerpApi — surfaces Naukri, LinkedIn, Indeed, company sites."""
+    api_key = os.getenv("SERPAPI_API_KEY", "").strip()
+    if not api_key:
+        return [], "SERPAPI_API_KEY not set"
+    out, errors = [], []
+    queries = SERPAPI_QUERIES[:6]
+    per_q = max(5, min(20, limit // max(1, len(queries))))
+    for q in queries:
+        try:
+            data = await _get_json(
+                client,
+                "https://serpapi.com/search.json",
+                params={"engine": "google_jobs", "q": q, "hl": "en", "api_key": api_key},
+            )
+            for raw in (data.get("jobs_results") or [])[:per_q]:
+                apply_options = raw.get("apply_options") or []
+                link = raw.get("share_link") or raw.get("link") or ""
+                if not link and apply_options:
+                    link = apply_options[0].get("link") or ""
+                for opt in apply_options:
+                    l = (opt.get("link") or "").lower()
+                    if any(x in l for x in ("naukri", "linkedin", "shine", "monster", "bayt", "gulftalent")):
+                        link = opt.get("link") or link
+                        break
+                company = raw.get("company_name") if isinstance(raw.get("company_name"), str) else ""
+                loc = raw.get("location") or ""
+                ext = raw.get("detected_extensions") or {}
+                posted = ext.get("posted_at") or ext.get("posted") or ""
+                desc_parts = [raw.get("description") or raw.get("snippet") or ""]
+                if raw.get("job_highlights"):
+                    for h in raw["job_highlights"]:
+                        items = h.get("items") or []
+                        desc_parts.append(" ".join(items))
+                normalized = {
+                    "title": raw.get("title"),
+                    "company": company,
+                    "location": loc,
+                    "url": link,
+                    "description": " ".join(str(x) for x in desc_parts if x),
+                    "id": raw.get("job_id") or link,
+                    "date": posted,
+                    "salary": (ext.get("salary") if isinstance(ext, dict) else None) or raw.get("salary"),
+                }
+                job = _clean_job(normalized, "Google Jobs (SerpApi)")
+                if job:
+                    via = normalize_text(raw.get("via") or "")
+                    if via:
+                        job["source"] = f"Google Jobs / {via}"[:80]
+                    out.append(job)
+        except Exception as e:
+            log.exception("SerpApi query failed: %s", q)
+            errors.append(f"SerpApi[{q[:40]}]: {str(e)[:160]}")
+    return out, ("; ".join(errors) if errors else None)
+
+
+async def fetch_greenhouse(client, limit):
+    boards = [b.strip() for b in os.getenv("GREENHOUSE_BOARDS", "").split(",") if b.strip()]
+    if not boards:
+        return [], None
+    out, errors = [], []
+    for board in boards[:15]:
+        try:
+            data = await _get_json(
+                client,
+                f"https://boards-api.greenhouse.io/v1/boards/{quote_plus(board)}/jobs",
+                params={"content": "true"},
+            )
+            for raw in (data.get("jobs") or [])[:limit]:
+                loc = ""
+                if isinstance(raw.get("location"), dict):
+                    loc = raw["location"].get("name") or ""
+                normalized = {
+                    "title": raw.get("title"),
+                    "company": board,
+                    "location": loc,
+                    "url": raw.get("absolute_url") or "",
+                    "description": raw.get("content") or "",
+                    "id": str(raw.get("id") or ""),
+                    "date": raw.get("updated_at") or raw.get("created_at"),
+                }
+                job = _clean_job(normalized, f"Greenhouse/{board}")
+                if job:
+                    out.append(job)
+        except Exception as e:
+            log.exception("Greenhouse %s failed", board)
+            errors.append(f"Greenhouse/{board}: {str(e)[:120]}")
+    return out, ("; ".join(errors) if errors else None)
+
+
+async def fetch_lever(client, limit):
+    sites = [s.strip() for s in os.getenv("LEVER_SITES", "").split(",") if s.strip()]
+    if not sites:
+        return [], None
+    out, errors = [], []
+    for site in sites[:15]:
+        try:
+            data = await _get_json(client, f"https://api.lever.co/v0/postings/{quote_plus(site)}")
+            rows = data if isinstance(data, list) else data.get("data") or []
+            for raw in rows[:limit]:
+                cats = raw.get("categories") or {}
+                loc = cats.get("location") or raw.get("location") or ""
+                normalized = {
+                    "title": raw.get("text") or raw.get("title"),
+                    "company": site,
+                    "location": loc,
+                    "url": raw.get("hostedUrl") or raw.get("applyUrl") or "",
+                    "description": raw.get("descriptionPlain") or raw.get("description") or "",
+                    "id": str(raw.get("id") or ""),
+                    "date": raw.get("createdAt"),
+                }
+                job = _clean_job(normalized, f"Lever/{site}")
+                if job:
+                    out.append(job)
+        except Exception as e:
+            log.exception("Lever %s failed", site)
+            errors.append(f"Lever/{site}: {str(e)[:120]}")
+    return out, ("; ".join(errors) if errors else None)
 
 
 async def fetch_public_sources(settings):
     results, errors = [], []
     limit = max(10, min(250, int(settings.get("max_results_per_source", 100))))
-    async with httpx.AsyncClient(headers={"User-Agent": "AutonomousJobHunter/0.2"}) as client:
+    async with httpx.AsyncClient(headers={"User-Agent": "AutonomousJobHunter/0.3"}) as client:
+        for name, coro in [
+            ("Arbeitnow", fetch_arbeitnow(client, limit)),
+            ("Remotive", fetch_remotive(client, limit)),
+            ("Jobicy", fetch_jobicy(client, limit)),
+        ]:
+            try:
+                results.extend(await coro)
+            except Exception as e:
+                log.exception("%s failed", name)
+                errors.append(f"{name}: {str(e)[:200]}")
+
+        serps, serr = await fetch_serpapi_google_jobs(client, limit)
+        results.extend(serps)
+        if serr:
+            errors.append(serr)
+
+        gh, gerr = await fetch_greenhouse(client, limit)
+        results.extend(gh)
+        if gerr:
+            errors.append(gerr)
+
+        lv, lerr = await fetch_lever(client, limit)
+        results.extend(lv)
+        if lerr:
+            errors.append(lerr)
+
         try:
-            data = await _get_json(client, "https://www.arbeitnow.com/api/job-board-api")
-            for raw in (data.get("data") or data.get("jobs") or [])[:limit]:
-                job = _clean_job(raw if isinstance(raw, dict) else {}, "Arbeitnow")
-                if job:
-                    results.append(job)
+            from gmail_alerts import fetch_jobs_from_gmail
+
+            gmail_jobs, gmail_err = await fetch_jobs_from_gmail()
+            results.extend(gmail_jobs)
+            if gmail_err:
+                errors.append(gmail_err)
         except Exception as e:
-            log.exception("Arbeitnow failed")
-            errors.append("Arbeitnow: " + str(e)[:200])
-        try:
-            data = await _get_json(client, "https://remotive.com/api/remote-jobs")
-            for raw in (data.get("jobs") or [])[:limit]:
-                job = _clean_job(raw if isinstance(raw, dict) else {}, "Remotive")
-                if job:
-                    results.append(job)
-        except Exception as e:
-            log.exception("Remotive failed")
-            errors.append("Remotive: " + str(e)[:200])
-        try:
-            data = await _get_json(client, "https://jobicy.com/api/v2/remote-jobs", params={"count": limit})
-            for raw in (data.get("jobs") or [])[:limit]:
-                job = _clean_job(raw if isinstance(raw, dict) else {}, "Jobicy")
-                if job:
-                    results.append(job)
-        except Exception as e:
-            log.exception("Jobicy failed")
-            errors.append("Jobicy: " + str(e)[:200])
+            log.exception("Gmail alerts failed")
+            errors.append("Gmail: " + str(e)[:200])
+
     return results, errors
 
 
@@ -155,11 +340,13 @@ async def hunt_jobs():
     init_db()
     fetched, errors = await fetch_public_sources(settings)
     inserted = updated = 0
+    sources_touched = set()
     with connect() as conn:
         for job in fetched:
             score, reasons, country = score_job(job, settings)
             if country not in LISTABLE_COUNTRIES:
                 continue
+            sources_touched.add(job.get("source") or "?")
             job["match_score"] = score
             job["match_reasons"] = json.dumps(reasons, ensure_ascii=False)
             job["country"] = country
@@ -168,11 +355,11 @@ async def hunt_jobs():
                 conn.execute(
                     """UPDATE jobs SET title=?,company=?,location=?,country=?,description=?,
                     employment_type=?,salary=?,posted_at=?,match_score=?,match_reasons=?,
-                    last_seen_at=?,raw_json=? WHERE id=?""",
+                    last_seen_at=?,raw_json=?,source=? WHERE id=?""",
                     (
                         job["title"], job["company"], job["location"], country, job["description"],
                         job["employment_type"], job["salary"], job["posted_at"], score,
-                        job["match_reasons"], now_iso(), job["raw_json"], existing["id"],
+                        job["match_reasons"], now_iso(), job["raw_json"], job["source"], existing["id"],
                     ),
                 )
                 updated += 1
@@ -190,7 +377,7 @@ async def hunt_jobs():
                 inserted += 1
         conn.execute(
             "INSERT INTO hunt_runs(started_at,finished_at,sources_checked,fetched,new_jobs,errors) VALUES (?,?,?,?,?,?)",
-            (started, now_iso(), 3, len(fetched), inserted, json.dumps(errors)),
+            (started, now_iso(), len(sources_touched), len(fetched), inserted, json.dumps(errors)),
         )
     return {
         "status": "completed",
@@ -199,6 +386,7 @@ async def hunt_jobs():
         "fetched": len(fetched),
         "new_jobs": inserted,
         "updated_jobs": updated,
+        "sources": sorted(sources_touched),
         "errors": errors,
         "live_applications_enabled": False,
     }
@@ -233,9 +421,11 @@ def list_jobs(
             term = term.strip()
             if not term:
                 continue
-            clauses.append("(lower(title) LIKE ? OR lower(company) LIKE ? OR lower(location) LIKE ?)")
+            clauses.append(
+                "(lower(title) LIKE ? OR lower(company) LIKE ? OR lower(location) LIKE ? OR lower(source) LIKE ?)"
+            )
             like = "%" + term.lower() + "%"
-            params.extend([like, like, like])
+            params.extend([like, like, like, like])
     if opportunity:
         opp = opportunity.lower()
         if opp == "high demand":
