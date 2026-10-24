@@ -30,13 +30,13 @@ SERPAPI_QUERIES = [
     "Cluster Manager India",
     "Operations Manager QSR India",
     "Dark Store Manager India",
-    "City Operations Manager India",
-    "Warehouse Manager India",
-    "Cluster Manager UAE OR Dubai OR \"Saudi Arabia\" OR Qatar",
-    "Operations Manager Gulf OR UAE OR Riyadh",
+    "City Operations Manager India OR Noida OR Gurugram",
+    "Warehouse Manager OR Fulfilment Manager India",
+    "Regional Operations Manager India",
     "Multi Unit Operations Manager India",
-    "Fulfilment Manager India OR UAE",
-    "Q-commerce Operations Manager India",
+    "Q-commerce OR quick commerce Operations Manager India",
+    "Cluster Manager UAE OR Dubai OR Riyadh OR Qatar",
+    "Operations Manager Gulf OR UAE OR Saudi Arabia",
 ]
 
 
@@ -171,7 +171,6 @@ async def fetch_jobicy(client, limit):
 
 
 async def fetch_serpapi_google_jobs(client, limit):
-    """Google Jobs via SerpApi — surfaces Naukri, LinkedIn, Indeed, company sites."""
     api_key = os.getenv("SERPAPI_API_KEY", "").strip()
     if not api_key:
         return [], "SERPAPI_API_KEY not set"
@@ -293,7 +292,7 @@ async def fetch_lever(client, limit):
 async def fetch_public_sources(settings):
     results, errors = [], []
     limit = max(10, min(250, int(settings.get("max_results_per_source", 100))))
-    async with httpx.AsyncClient(headers={"User-Agent": "AutonomousJobHunter/0.3"}) as client:
+    async with httpx.AsyncClient(headers={"User-Agent": "AutonomousJobHunter/0.4"}) as client:
         for name, coro in [
             ("Arbeitnow", fetch_arbeitnow(client, limit)),
             ("Remotive", fetch_remotive(client, limit)),
@@ -341,6 +340,7 @@ async def hunt_jobs():
     fetched, errors = await fetch_public_sources(settings)
     inserted = updated = 0
     sources_touched = set()
+    notify_jobs = []
     with connect() as conn:
         for job in fetched:
             score, reasons, country = score_job(job, settings)
@@ -375,10 +375,23 @@ async def hunt_jobs():
                     ),
                 )
                 inserted += 1
+                min_wa = int(os.getenv("WHATSAPP_MIN_SCORE", "70"))
+                if score >= min_wa:
+                    notify_jobs.append({
+                        "title": job["title"], "company": job["company"], "location": job["location"],
+                        "country": country, "url": job["url"], "match_score": score,
+                    })
         conn.execute(
             "INSERT INTO hunt_runs(started_at,finished_at,sources_checked,fetched,new_jobs,errors) VALUES (?,?,?,?,?,?)",
             (started, now_iso(), len(sources_touched), len(fetched), inserted, json.dumps(errors)),
         )
+    notify_result = {"sent": False, "skipped": True}
+    try:
+        from notify import notify_high_match_jobs
+        notify_result = await notify_high_match_jobs(notify_jobs)
+    except Exception as e:
+        log.exception("WhatsApp notify failed")
+        notify_result = {"sent": False, "error": str(e)[:200]}
     return {
         "status": "completed",
         "started_at": started,
@@ -388,6 +401,7 @@ async def hunt_jobs():
         "updated_jobs": updated,
         "sources": sorted(sources_touched),
         "errors": errors,
+        "whatsapp_notify": notify_result,
         "live_applications_enabled": False,
     }
 
