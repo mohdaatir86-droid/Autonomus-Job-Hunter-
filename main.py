@@ -8,10 +8,11 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from job_hunter import get_settings, save_settings, init_db
 from job_sources import hunt_jobs, get_stats, list_jobs, set_job_status
+from gmail_alerts import build_auth_url, exchange_code, get_gmail_status, init_gmail_db
 from application_workflow import (
     init_workflow_db,
     get_profile,
@@ -31,12 +32,13 @@ log = logging.getLogger("job-hunter")
 async def lifespan(app: FastAPI):
     init_db()
     init_workflow_db()
+    init_gmail_db()
     if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
             scheduler = AsyncIOScheduler(timezone="UTC")
-            minutes = max(15, int(os.getenv("HUNT_INTERVAL_MINUTES", "15")))
+            minutes = max(10, int(os.getenv("HUNT_INTERVAL_MINUTES", "15")))
 
             async def scheduled_hunt():
                 await hunt_jobs()
@@ -64,8 +66,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Autonomous Job Hunter",
-    version="0.2.0",
-    description="Job discovery, deduplication, candidate matching and application tracking. Submission is intentionally disabled by default.",
+    version="0.3.0",
+    description="Job discovery across public APIs, Google Jobs, ATS boards and Gmail job alerts. Submission is intentionally disabled by default.",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -126,6 +128,7 @@ def health():
         "live_applications_enabled": False,
         "application_preparation_enabled": True,
         "resume_profile_configured": get_profile().get("has_resume", False),
+        "gmail": get_gmail_status(),
     }
 
 
@@ -289,8 +292,40 @@ def application_events(draft_id: int):
     return {"items": events}
 
 
+@app.get("/api/gmail/status")
+def gmail_status():
+    return get_gmail_status()
+
+
+@app.get("/api/gmail/auth")
+def gmail_auth():
+    try:
+        url = build_auth_url()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return RedirectResponse(url)
+
+
+@app.get("/api/gmail/callback")
+async def gmail_callback(code: str | None = None, error: str | None = None):
+    if error:
+        raise HTTPException(status_code=400, detail="Google OAuth error: " + error)
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+    try:
+        result = await exchange_code(code)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)[:300])
+    return {
+        "status": "connected",
+        "email": result.get("email"),
+        "next": "Create job alerts on Naukri, LinkedIn, Shine, Monster, Bayt pointing to this Gmail. Then run Hunt — alerts will be ingested automatically.",
+    }
+
+
 @app.get("/api/sources")
 def sources():
+    gmail = get_gmail_status()
     return {
         "sources": [
             {"name": "Arbeitnow", "type": "Public job API", "configured": True, "connection_mode": "API"},
@@ -298,26 +333,32 @@ def sources():
             {"name": "Jobicy", "type": "Public job API", "configured": True, "connection_mode": "API"},
             {
                 "name": "Google Jobs via SerpApi",
-                "type": "Search API",
+                "type": "Search API (includes Naukri/LinkedIn/Indeed listings)",
                 "configured": bool(os.getenv("SERPAPI_API_KEY", "").strip()),
-                "connection_mode": "API key required",
+                "connection_mode": "SERPAPI_API_KEY",
             },
             {
                 "name": "Greenhouse company boards",
                 "type": "Public company ATS API",
                 "configured": bool(os.getenv("GREENHOUSE_BOARDS", "").strip()),
-                "connection_mode": "Company board slugs",
+                "connection_mode": "GREENHOUSE_BOARDS slugs",
             },
             {
                 "name": "Lever company boards",
                 "type": "Public company ATS API",
                 "configured": bool(os.getenv("LEVER_SITES", "").strip()),
-                "connection_mode": "Company board slugs",
+                "connection_mode": "LEVER_SITES slugs",
             },
-            {"name": "Naukri", "type": "Job board", "configured": False, "connection_mode": "Official integration or job-alert email required"},
-            {"name": "Shine", "type": "Job board", "configured": False, "connection_mode": "Official integration or job-alert email required"},
-            {"name": "Monster", "type": "Job board", "configured": False, "connection_mode": "Official integration or job-alert email required"},
-            {"name": "LinkedIn", "type": "Job board", "configured": False, "connection_mode": "Authorized API/partner access required"},
+            {
+                "name": "Naukri / LinkedIn / Shine / Monster / Bayt / GulfTalent",
+                "type": "Job-alert email via Gmail",
+                "configured": gmail.get("connected", False),
+                "connection_mode": "Connect Gmail OAuth + create job alerts on each site",
+                "oauth_configured": gmail.get("oauth_configured", False),
+                "gmail_email": gmail.get("email") or None,
+                "auth_url": "/api/gmail/auth",
+            },
         ],
-        "note": "No portal passwords are stored. Naukri, Shine, Monster and LinkedIn are not connected until an authorized integration is configured. Direct application submission remains disabled.",
+        "note": "Boards are not password-scraped. Naukri/LinkedIn/Shine/Monster/Gulf enter via Google Jobs (SerpApi) and Gmail job alerts. Auto-submit remains disabled.",
+        "gmail": gmail,
     }
