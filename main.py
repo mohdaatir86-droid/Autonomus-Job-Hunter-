@@ -13,6 +13,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from job_hunter import get_settings, save_settings, init_db
 from job_sources import hunt_jobs, get_stats, list_jobs, set_job_status
 from gmail_alerts import build_auth_url, exchange_code, get_gmail_status, init_gmail_db
+from ai_assist import ai_status
+from notify import notify_status, send_whatsapp
 from application_workflow import (
     init_workflow_db,
     get_profile,
@@ -66,8 +68,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Autonomous Job Hunter",
-    version="0.3.0",
-    description="Job discovery across public APIs, Google Jobs, ATS boards and Gmail job alerts. Submission is intentionally disabled by default.",
+    version="0.4.0",
+    description="Personal master job hunter: multi-source discovery, AI drafts, WhatsApp alerts. You submit applications manually.",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -129,6 +131,8 @@ def health():
         "application_preparation_enabled": True,
         "resume_profile_configured": get_profile().get("has_resume", False),
         "gmail": get_gmail_status(),
+        "ai": ai_status(),
+        "whatsapp": notify_status(),
     }
 
 
@@ -169,7 +173,13 @@ def jobs(
 
 @app.post("/api/hunt")
 async def hunt():
-    return await hunt_jobs()
+    result = await hunt_jobs()
+    if "whatsapp_notify" not in result:
+        result["whatsapp_notify"] = {
+            "sent": False,
+            "note": "Update job_sources for auto-notify on new high matches",
+        }
+    return result
 
 
 @app.get("/api/settings")
@@ -264,8 +274,8 @@ def application_drafts():
 
 
 @app.post("/api/applications/draft/{job_id}")
-def prepare_application(job_id: int):
-    draft = create_application_draft(job_id)
+async def prepare_application(job_id: int):
+    draft = await create_application_draft(job_id)
     if not draft:
         raise HTTPException(status_code=404, detail="job not found")
     return draft
@@ -323,6 +333,29 @@ async def gmail_callback(code: str | None = None, error: str | None = None):
     }
 
 
+@app.get("/api/intelligence")
+def intelligence():
+    return {
+        "ai": ai_status(),
+        "whatsapp": notify_status(),
+        "plan": {
+            "discover": "SerpApi Google Jobs + Gmail alerts + public APIs + ATS boards",
+            "score": "Profile-weighted match for Cluster/QSR/dark-store ops",
+            "prepare": "AI cover letter + resume guidance when AI_API_KEY is set",
+            "notify": "WhatsApp on new jobs with score >= WHATSAPP_MIN_SCORE",
+            "apply": "You review draft and submit the application yourself",
+        },
+    }
+
+
+@app.post("/api/notify/test")
+async def notify_test():
+    result = await send_whatsapp("Job Hunter test: WhatsApp push is working.")
+    if not result.get("sent"):
+        raise HTTPException(status_code=400, detail=result)
+    return result
+
+
 @app.get("/api/sources")
 def sources():
     gmail = get_gmail_status()
@@ -361,4 +394,6 @@ def sources():
         ],
         "note": "Boards are not password-scraped. Naukri/LinkedIn/Shine/Monster/Gulf enter via Google Jobs (SerpApi) and Gmail job alerts. Auto-submit remains disabled.",
         "gmail": gmail,
+        "ai": ai_status(),
+        "whatsapp": notify_status(),
     }
