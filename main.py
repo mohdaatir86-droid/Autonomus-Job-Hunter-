@@ -122,6 +122,7 @@ def root():
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
+@app.api_route("/health.", methods=["GET", "HEAD"])  # tolerate Render health-check path typo
 def health():
     return {
         "status": "ok",
