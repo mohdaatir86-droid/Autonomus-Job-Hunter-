@@ -87,7 +87,7 @@ def init_db():
             except (TypeError, json.JSONDecodeError):
                 saved_countries = []
             legacy_defaults = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"]
-            if saved_countries == legacy_defaults or saved_countries == ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"]:
+            if saved_countries == legacy_defaults or set(saved_countries) == set(legacy_defaults):
                 conn.execute("UPDATE settings SET value=? WHERE key='target_countries'",
                              (json.dumps(DEFAULT_COUNTRIES),))
 
