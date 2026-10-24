@@ -13,5 +13,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest
-      - run: python -m compileall -q main.py job_hunter.py job_sources.py application_workflow.py
+      - run: python -m compileall -q main.py job_hunter.py job_sources.py application_workflow.py gmail_alerts.py
       - run: python -m pytest -q
