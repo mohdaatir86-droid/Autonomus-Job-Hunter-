@@ -98,15 +98,7 @@ async def generate_resume_guidance(job: dict, profile: dict, keywords: list[str]
             "candidate_summary": (profile.get("experience_summary") or "")[:1200],
             "skills": profile.get("skills") or [],
             "keywords": keywords[:15],
-            "known_metrics": [
-                "12 stores launched in one month",
-                "18 dark stores",
-                "~30,000 orders/day",
-                "450+ associates",
-                "90%+ SLA",
-                "29% shrinkage reduction",
-            ],
-        },
+                    },
         ensure_ascii=False,
     )
     raw = await _chat(system, user, max_tokens=400)
