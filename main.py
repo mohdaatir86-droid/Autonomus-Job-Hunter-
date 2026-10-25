@@ -93,6 +93,8 @@ async def protect_private_candidate_data(request, call_next):
         or path.startswith("/api/profile/")
         or path == "/api/applications"
         or path.startswith("/api/applications/")
+        or path == "/api/auto-apply"
+        or path.startswith("/api/auto-apply/")
     )
     if protected:
         expected = os.getenv("PORTAL_ACCESS_TOKEN", "").strip()
@@ -281,6 +283,44 @@ async def upload_resume(file: UploadFile = File(...)):
     finally:
         await file.close()
 
+
+
+@app.post("/api/auto-apply/queue")
+async def auto_apply_queue():
+    """Prepare a review queue for high-match jobs; never submits applications automatically."""
+    candidates = list_jobs(min_score=80, status=None, limit=25)
+    prepared, skipped, errors = [], [], []
+    for job in candidates:
+        if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant"}:
+            skipped.append({"job_id": job.get("id"), "reason": "job already actioned"})
+            continue
+        try:
+            draft = await create_application_draft(int(job["id"]))
+            if draft:
+                prepared.append({
+                    "draft_id": draft.get("id"),
+                    "job_id": job.get("id"),
+                    "title": job.get("title"),
+                    "company": job.get("company"),
+                    "match_score": job.get("match_score"),
+                    "ai_assisted": draft.get("ai_assisted", False),
+                    "status": draft.get("status", "prepared"),
+                    "url": job.get("url"),
+                })
+        except Exception as exc:
+            log.exception("Auto-apply queue preparation failed for job %s", job.get("id"))
+            errors.append({"job_id": job.get("id"), "error": str(exc)[:180]})
+    return {
+        "status": "prepared_for_review",
+        "threshold": 80,
+        "candidate_count": len(candidates),
+        "prepared_count": len(prepared),
+        "prepared": prepared,
+        "skipped": skipped,
+        "errors": errors,
+        "automatic_submission_enabled": False,
+        "message": "Drafts prepared only. Review each application and submit on the employer website yourself."
+    }
 
 @app.get("/api/applications")
 def application_drafts():
