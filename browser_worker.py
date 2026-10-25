@@ -15,7 +15,7 @@ from application_workflow import get_profile_full, list_application_drafts, upda
 from database import connect as db_connect
 from job_hunter import DB_PATH
 
-ALLOWED_HOSTS = {"greenhouse.io", "boards.greenhouse.io", "jobs.lever.co", "lever.co"}\n# Login-required job boards are deliberately not enabled for submission by default.\nAUTHENTICATED_HOSTS = {"naukri.com", "linkedin.com", "indeed.com", "foundit.in", "gulftalent.com", "bayt.com"}
+ALLOWED_HOSTS = {"greenhouse.io", "boards.greenhouse.io", "jobs.lever.co", "lever.co"}
 BLOCK_TERMS = re.compile(r"captcha|recaptcha|hcaptcha|one.?time.?password|verification code|\botp\b|work authorization|legally authorized|sponsorship|visa status|disability|veteran|race|ethnicity|gender|sexual orientation|criminal conviction|background check|terms and conditions|certify|attest", re.I)
 CONFIRM_TERMS = re.compile(r"application (?:has been )?(?:submitted|received)|thank you for applying|successfully applied|your application is complete|we received your application", re.I)
 
@@ -149,7 +149,7 @@ async def _run(draft_id, dry_run=True):
             if unknown_required:
                 _event(draft_id, "browser_blocked", "Unknown required fields need manual review: " + ", ".join(unknown_required[:8]))
                 return {"status": "blocked", "reason": "unknown_required_fields", "fields": unknown_required[:8], "filled": filled}
-            if host_kind == "authenticated_board" and os.getenv("AUTHENTICATED_BOARD_SUBMIT_ENABLED", "false").lower() != "true":\n                return {"status": "ready_to_submit", "filled_fields": filled, "detail": "Authenticated portal form filled in dry-run mode; live submission for login-required boards remains disabled until the portal-specific flow and terms are verified."}\n            if dry_run or os.getenv("BROWSER_ALLOW_SUBMIT", "false").lower() != "true":
+            if dry_run or os.getenv("BROWSER_ALLOW_SUBMIT", "false").lower() != "true":
                 return {"status": "ready_to_submit", "filled_fields": filled, "detail": "Form filled in a temporary browser session; submission is disabled until explicitly enabled in Render."}
             submit = form.locator('button[type="submit"], input[type="submit"], button:has-text("Submit application"), button:has-text("Submit"), button:has-text("Apply")')
             if await submit.count() == 0:
