@@ -1,4 +1,8 @@
-"""SQLite/PostgreSQL compatibility layer for Job Hunter."""
+"""Small SQLite/PostgreSQL compatibility layer used by Job Hunter.
+
+Set DATABASE_URL in the hosting environment to enable PostgreSQL. Without it,
+the app uses SQLite at DATABASE_PATH (default: ./job_hunter.db).
+"""
 from __future__ import annotations
 
 import os
@@ -14,13 +18,13 @@ def postgres_enabled() -> bool:
 
 
 class HybridRow(Mapping):
+    """Row supporting both sqlite-style row['name']/row[0] and dict(row)."""
     def __init__(self, names, values):
         self._data = dict(zip(names, values))
+        self._values = tuple(values)
 
     def __getitem__(self, key):
-        if isinstance(key, int):
-            return tuple(self._data.values())[key]
-        return self._data[key]
+        return self._values[key] if isinstance(key, int) else self._data[key]
 
     def __iter__(self):
         return iter(self._data)
@@ -35,7 +39,10 @@ class HybridRow(Mapping):
 class PgCursor:
     def __init__(self, cursor):
         self._cursor = cursor
-        self._names = [d.name if hasattr(d, "name") else d[0] for d in (cursor.description or [])]
+        self._names = [
+            d.name if hasattr(d, "name") else d[0]
+            for d in (cursor.description or [])
+        ]
 
     def _row(self, row):
         return HybridRow(self._names, row) if row is not None else None
@@ -49,6 +56,11 @@ class PgCursor:
     @property
     def rowcount(self):
         return self._cursor.rowcount
+
+    @property
+    def lastrowid(self):
+        # PostgreSQL does not expose SQLite's implicit lastrowid.
+        return None
 
 
 class PgConnection:
@@ -67,17 +79,40 @@ class PgConnection:
 
     @staticmethod
     def _sql(sql):
-        ignore_insert = bool(re.search(r"(?i)INSERT\s+OR\s+IGNORE\s+INTO", sql))
+        # Translate the SQLite-only INSERT OR IGNORE idiom.
+        ignore_insert = bool(re.search(r"(?i)\bINSERT\s+OR\s+IGNORE\s+INTO\b", sql))
         if ignore_insert:
-            sql = re.sub(r"(?i)INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", sql)
-            if "ON CONFLICT" not in sql.upper():
+            sql = re.sub(r"(?i)\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT INTO", sql)
+            if not re.search(r"(?i)\bON\s+CONFLICT\b", sql):
                 sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+
+        # Existing app query: date(COALESCE(posted_at, first_seen_at)) >= date('now', ?)
         sql = re.sub(
-            r"(?i)date\(COALESCE\(posted_at, first_seen_at\)\)\s*>=\s*date\('now',\s*\?\)",
-            "COALESCE(posted_at, first_seen_at)::date >= (CURRENT_DATE + (?)::interval)",
+            r"(?i)date\(COALESCE\(posted_at,\s*first_seen_at\)\)\s*>=\s*date\('now',\s*\?\)",
+            "COALESCE(posted_at, first_seen_at)::date >= (CURRENT_DATE + (%s)::interval)",
             sql,
         )
-        return sql.replace("?", "%s")
+        # Replace parameter markers outside quoted SQL strings.
+        out, i, quote = [], 0, None
+        while i < len(sql):
+            ch = sql[i]
+            if quote:
+                out.append(ch)
+                if ch == quote:
+                    if i + 1 < len(sql) and sql[i + 1] == quote:
+                        out.append(sql[i + 1])
+                        i += 1
+                    else:
+                        quote = None
+            elif ch in ("'", '"'):
+                quote = ch
+                out.append(ch)
+            elif ch == "?":
+                out.append("%s")
+            else:
+                out.append(ch)
+            i += 1
+        return "".join(out)
 
     def execute(self, sql, params=()):
         import psycopg
@@ -86,22 +121,29 @@ class PgConnection:
         return PgCursor(cursor)
 
 
+def _postgres_url():
+    url = os.getenv("DATABASE_URL", "").strip()
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    parts = urlsplit(url)
+    if not parts.scheme.startswith("postgresql"):
+        raise ValueError("DATABASE_URL must be a PostgreSQL connection string")
+    query = parts.query
+    if not query:
+        query = "sslmode=require"
+    elif not re.search(r"(?:^|&)sslmode=", query, flags=re.I):
+        query += "&sslmode=require"
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
 def connect(db_path=None):
     url = os.getenv("DATABASE_URL", "").strip()
     if url:
         import psycopg
         from psycopg.rows import tuple_row
-        if url.startswith("postgres://"):
-            url = "postgresql://" + url[len("postgres://"):]
-        parts = urlsplit(url)
-        if not parts.scheme.startswith("postgresql"):
-            raise ValueError("DATABASE_URL must be a PostgreSQL connection string")
-        if not parts.query:
-            url = urlunsplit((parts.scheme, parts.netloc, parts.path, "sslmode=require", parts.fragment))
-        elif "sslmode=" not in parts.query:
-            url += ("&" if "?" in url else "?") + "sslmode=require"
-        raw = psycopg.connect(url, connect_timeout=15, row_factory=tuple_row)
-        return PgConnection(raw)
+        return PgConnection(
+            psycopg.connect(_postgres_url(), connect_timeout=15, row_factory=tuple_row)
+        )
 
     path = str(db_path or os.getenv("DATABASE_PATH", "job_hunter.db"))
     if path != ":memory:":
@@ -111,3 +153,51 @@ def connect(db_path=None):
     conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def database_diagnostics():
+    """Return non-secret connectivity/schema diagnostics for /health/db."""
+    expected_tables = (
+        "jobs", "hunt_runs", "settings", "candidate_profile",
+        "application_drafts", "application_events", "gmail_tokens",
+        "gmail_seen_messages",
+    )
+    mode = "postgresql" if postgres_enabled() else "sqlite"
+    try:
+        with connect() as conn:
+            if mode == "postgresql":
+                rows = conn.execute(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+                ).fetchall()
+                existing = {row["table_name"] for row in rows}
+            else:
+                rows = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+                existing = {row["name"] for row in rows}
+            missing = [name for name in expected_tables if name not in existing]
+            counts = {}
+            for table in expected_tables:
+                if table in existing:
+                    # Table names are fixed constants, not user input.
+                    counts[table] = conn.execute(
+                        "SELECT COUNT(*) FROM " + table
+                    ).fetchone()[0]
+        return {
+            "ok": not missing,
+            "mode": mode,
+            "connected": True,
+            "expected_tables": len(expected_tables),
+            "missing_tables": missing,
+            "row_counts": counts,
+        }
+    except Exception as exc:
+        # Never return connection URLs, credentials, or driver exception details.
+        return {
+            "ok": False,
+            "mode": mode,
+            "connected": False,
+            "expected_tables": len(expected_tables),
+            "error_type": type(exc).__name__,
+        }

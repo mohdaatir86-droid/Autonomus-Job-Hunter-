@@ -15,7 +15,7 @@ from job_sources import hunt_jobs, get_stats, list_jobs, set_job_status
 from gmail_alerts import build_auth_url, exchange_code, get_gmail_status, init_gmail_db
 from ai_assist import ai_status
 from notify import notify_status, send_whatsapp
-from database import postgres_enabled
+from database import postgres_enabled, database_diagnostics
 
 from application_workflow import (
     init_workflow_db,
@@ -29,7 +29,7 @@ from application_workflow import (
 )
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-# HTTPX logs full request URLs; SerpApi keys are query parameters, so suppress those URLs.
+# HTTPX logs full request URLs; API keys may be query parameters.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("job-hunter")
 
@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Autonomous Job Hunter",
-    version="0.4.0",
+    version="0.4.1",
     description="Personal master job hunter: multi-source discovery, AI drafts, WhatsApp alerts. You submit applications manually.",
     lifespan=lifespan,
 )
@@ -126,11 +126,12 @@ def root():
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
-@app.api_route("/health.", methods=["GET", "HEAD"])  # tolerate Render health-check path typo
+@app.api_route("/health.", methods=["GET", "HEAD"])
 def health():
     return {
         "status": "ok",
         "service": "autonomous-job-hunter",
+        "version": app.version,
         "database_mode": "postgresql" if postgres_enabled() else "sqlite",
         "time": datetime.now(timezone.utc).isoformat(),
         "live_applications_enabled": False,
@@ -140,6 +141,13 @@ def health():
         "ai": ai_status(),
         "whatsapp": notify_status(),
     }
+
+
+@app.get("/health/db")
+def health_db():
+    """Safe DB diagnostic: reports connectivity/table counts but never secrets."""
+    result = database_diagnostics()
+    return JSONResponse(status_code=200 if result.get("connected") else 503, content=result)
 
 
 @app.get("/healthz")
