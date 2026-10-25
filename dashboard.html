@@ -77,12 +77,27 @@ async function loadSources(){try{const data=await api("/api/sources");const sour
 async function loadJobs(){const q=document.getElementById("jobSearch").value.trim(),country=document.getElementById("filterCountry").value,score=document.getElementById("filterScore").value,posted=document.getElementById("filterPosted").value,status=document.getElementById("filterStatus").value;const params=new URLSearchParams();if(q)params.set("q",q);if(country)params.set("country",country);if(score)params.set("min_score",score);if(posted)params.set("posted_within_days",posted);if(status)params.set("status",status);params.set("limit","80");const body=document.getElementById("jobsBody");body.innerHTML='<tr><td colspan="6"><div class="empty-state">Loading opportunities…</div></td></tr>';try{const data=await api("/api/jobs?"+params.toString()),items=data.items||data||[];document.getElementById("jobCountBadge").textContent=items.length+" jobs";document.getElementById("resultText").textContent=items.length?"Showing "+items.length+" opportunities":"No matching jobs";if(!items.length){body.innerHTML='<tr><td colspan="6"><div class="empty-state"><h3>No jobs found</h3>Try widening filters or run a new hunt.</div></td></tr>';return}body.innerHTML=items.map(j=>{const score=Number(j.match_score)||0,cls=score>=80?"high":score>=65?"":"mid";const raw=String(j.url||"#"),url=/^https?:\/\//i.test(raw)?raw:"#";return'<tr><td><a class="job-title" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+esc(j.title||"Untitled")+'</a><div class="job-company">'+esc(j.company||"—")+'</div><div class="job-meta">'+esc(j.posted_at?new Date(j.posted_at).toLocaleDateString():"")+'</div></td><td><div>'+esc(j.location||"—")+'</div><div class="job-meta">'+esc(j.country||"")+'</div></td><td>'+esc(j.source||"—")+'</td><td><span class="score-pill '+cls+'">'+score+'</span></td><td><select class="status-select" aria-label="Application status" onchange="updateStatus('+Number(j.id)+',this.value)"><option value="new" '+(j.status==="new"?"selected":"")+'>New</option><option value="saved" '+(j.status==="saved"?"selected":"")+'>Saved</option><option value="applied_manually" '+(j.status==="applied_manually"?"selected":"")+'>Applied</option><option value="interview" '+(j.status==="interview"?"selected":"")+'>Interview</option><option value="offer" '+(j.status==="offer"?"selected":"")+'>Offer</option><option value="rejected" '+(j.status==="rejected"?"selected":"")+'>Rejected</option><option value="not_relevant" '+(j.status==="not_relevant"?"selected":"")+'>Not relevant</option></select></td><td><button class="btn btn-primary btn-sm" onclick="prepareApply('+Number(j.id)+')">Prepare apply</button> <a class="btn btn-ghost btn-sm" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">Open</a></td></tr>'}).join("")}catch(e){body.innerHTML='<tr><td colspan="6"><div class="empty-state"><h3>Could not load jobs</h3>'+esc(e.message)+'</div></td></tr>';toast(e.message,"error")}}
 async function updateStatus(id,status){try{await api("/api/jobs/"+id+"/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});toast("Status updated","success");loadStats()}catch(e){toast(e.message,"error")}}
 
+const PORTAL_TOKEN_STORAGE_KEY="jobHunterPortalAccessToken";
+function getPortalToken(){
+ let token="";
+ try{token=window.localStorage.getItem(PORTAL_TOKEN_STORAGE_KEY)||"";}catch(e){}
+ if(token)return token;
+ token=window.prompt("Enter your Job Hunter portal access token once. It will be saved on this device so you don't need to enter it every time.");
+ if(!token)return "";
+ token=token.trim();if(!token)return "";
+ try{window.localStorage.setItem(PORTAL_TOKEN_STORAGE_KEY,token);}catch(e){toast("Browser couldn't save the token; you may be asked again.","error");}
+ return token;
+}
+function clearPortalToken(){try{window.localStorage.removeItem(PORTAL_TOKEN_STORAGE_KEY);}catch(e){}}
+async function privateApi(path,opts){
+ const token=getPortalToken();if(!token)throw new Error("Access token required");
+ const options=opts||{};options.headers={...(options.headers||{}),Authorization:"Bearer "+token};
+ try{return await api(path,options);}catch(e){if(String(e.message).includes("401"))clearPortalToken();throw e;}
+}
 async function runAutoApplyQueue(){
- const token=window.prompt("Enter your Job Hunter portal access token to prepare private application drafts. No applications will be submitted automatically.");
- if(!token)return;
  const btn=document.getElementById("autoApplyBtn");btn.disabled=true;btn.textContent="Preparing…";
  try{
-  const result=await api("/api/auto-apply/queue",{method:"POST",headers:{"Authorization":"Bearer "+token}});
+  const result=await privateApi("/api/auto-apply/queue",{method:"POST"});
   const items=result.prepared||[];
   toast("Prepared "+(result.prepared_count||0)+" application drafts for review","success");
   const summary=items.slice(0,12).map(x=>"• "+(x.title||"Role")+" — "+(x.company||"Company")+" (score "+(x.match_score??"—")+")"+(x.ai_assisted?" [AI-assisted]":" [template]")).join("\n");
@@ -90,7 +105,7 @@ async function runAutoApplyQueue(){
  }catch(e){toast("AI Apply Queue failed: "+e.message,"error");}
  finally{btn.disabled=false;btn.textContent="AI Apply Queue";}
 }
-async function prepareApply(jobId){const token=window.prompt("Enter your Job Hunter portal access token to create a private application draft. It is used only for this request.");if(!token)return;try{const draft=await api("/api/applications/draft/"+jobId,{method:"POST",headers:{"Authorization":"Bearer "+token}});toast("Application draft prepared. Review before submitting.","success");window.alert("Application draft prepared (ID: "+(draft.id||draft.draft_id||"created")+"). Review the draft and submit on the employer's website yourself.");}catch(e){toast("Could not prepare draft: "+e.message,"error")}}
+async function prepareApply(jobId){try{const draft=await privateApi("/api/applications/draft/"+jobId,{method:"POST"});toast("Application draft prepared. Review before submitting.","success");window.alert("Application draft prepared (ID: "+(draft.id||draft.draft_id||"created")+"). Review the draft and submit on the employer's website yourself.");}catch(e){toast("Could not prepare draft: "+e.message,"error")}}
 function setScore(val,el){document.getElementById("filterScore").value=val;document.querySelectorAll(".chip").forEach(c=>c.classList.remove("active"));el.classList.add("active");loadJobs()}
 function resetFilters(){document.getElementById("jobSearch").value="";document.getElementById("filterCountry").value="";document.getElementById("filterScore").value="65";document.getElementById("filterPosted").value="3";document.getElementById("filterStatus").value="";document.querySelectorAll(".chip").forEach(c=>c.classList.toggle("active",c.dataset.score==="65"));loadJobs()}
 async function loadCoverage(){try{const jobs=await api("/api/jobs?limit=200&min_score=0"),items=jobs.items||jobs||[],countries={},sources={};items.forEach(j=>{const c=j.country||"Unspecified",s=j.source||"Unknown";countries[c]=(countries[c]||0)+1;sources[s]=(sources[s]||0)+1});document.getElementById("countryCoverage").innerHTML=Object.entries(countries).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<div class="coverage-item"><strong>'+esc(k)+'</strong><span>'+v+' listings</span></div>').join("")||'<span style="color:var(--muted)">No data yet</span>';document.getElementById("sourceCoverage").innerHTML=Object.entries(sources).sort((a,b)=>b[1]-a[1]).slice(0,16).map(([k,v])=>'<div class="coverage-item"><strong>'+esc(k)+'</strong><span>'+v+' listings</span></div>').join("")||'<span style="color:var(--muted)">No data yet</span>'}catch(e){console.warn("coverage",e)}}
