@@ -13,13 +13,14 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from job_hunter import get_settings, save_settings, init_db
 from job_sources import hunt_jobs, get_stats, list_jobs, set_job_status
 from gmail_alerts import build_auth_url, exchange_code, get_gmail_status, init_gmail_db, verify_oauth_state
-from ai_assist import ai_status
+from ai_assist import ai_status, generate_form_answers
 from notify import notify_status, send_whatsapp
 from database import postgres_enabled, database_diagnostics
 
 from application_workflow import (
     init_workflow_db,
     get_profile,
+    get_profile_full,
     save_profile,
     store_resume,
     create_application_draft,
@@ -110,6 +111,7 @@ async def protect_private_candidate_data(request, call_next):
         or path.startswith("/api/applications/")
         or path == "/api/auto-apply"
         or path.startswith("/api/auto-apply/")
+        or path == "/api/auto-fill"
     )
     if protected:
         expected = os.getenv("PORTAL_ACCESS_TOKEN", "").strip()
@@ -272,6 +274,45 @@ def update_job_status(job_id: int, payload: dict[str, Any]):
     if not result.get("updated"):
         raise HTTPException(status_code=404, detail="job not found")
     return result
+
+
+@app.post("/api/auto-fill")
+async def ai_auto_fill(payload: dict[str, Any]):
+    """Return suggested values for visible job-application fields. Never submits a form."""
+    page_url = str(payload.get("page_url", ""))[:1500]
+    page_title = str(payload.get("page_title", ""))[:300]
+    fields = payload.get("fields", [])
+    if not isinstance(fields, list) or not fields or len(fields) > 80:
+        raise HTTPException(status_code=422, detail="fields must contain 1 to 80 visible form fields")
+    cleaned = []
+    for i, field in enumerate(fields):
+        if not isinstance(field, dict):
+            continue
+        cleaned.append({
+            "id": str(field.get("id", i))[:80],
+            "label": str(field.get("label", ""))[:250],
+            "name": str(field.get("name", ""))[:150],
+            "type": str(field.get("type", "text"))[:40],
+            "placeholder": str(field.get("placeholder", ""))[:200],
+            "required": bool(field.get("required", False)),
+            "options": [str(x)[:160] for x in field.get("options", [])[:40]] if isinstance(field.get("options", []), list) else [],
+        })
+    if not cleaned:
+        raise HTTPException(status_code=422, detail="No supported form fields found")
+    profile = get_profile_full()
+    answers = await generate_form_answers(
+        {"title": page_title, "url": page_url, "fields": cleaned},
+        profile,
+    )
+    if answers is None:
+        raise HTTPException(status_code=503, detail="AI form assistance is unavailable. Check AI_API_KEY in Render.")
+    return {
+        "status": "suggestions_ready",
+        "page_title": page_title,
+        "answers": answers,
+        "filled_count": sum(1 for x in answers.values() if isinstance(x, str) and x.strip()),
+        "note": "Suggested values only. Review every field. The assistant never submits the application."
+    }
 
 
 @app.get("/api/profile")
