@@ -111,7 +111,8 @@ def main():
                 if not rows:
                     break
                 before = pg.execute(sql.SQL("SELECT COUNT(*) AS n FROM {}").format(quoted_table)).fetchone()["n"]
-                pg.executemany(statement, [tuple(row[c] for c in columns) for row in rows])
+                with pg.cursor() as cursor:
+                    cursor.executemany(statement, [tuple(row[c] for c in columns) for row in rows])
                 after = pg.execute(sql.SQL("SELECT COUNT(*) AS n FROM {}").format(quoted_table)).fetchone()["n"]
                 inserted_total += max(0, after - before)
                 offset += len(rows)
@@ -119,12 +120,18 @@ def main():
 
             # Preserve integer IDs and advance serial/identity sequences where applicable.
             if "id" in columns:
-                pg.execute(
-                    "SELECT setval(pg_get_serial_sequence(%s, 'id'), "
-                    "GREATEST(COALESCE((SELECT MAX(id) FROM " + table + "), 1), 1), "
-                    "EXISTS(SELECT 1 FROM " + table + "))",
+                sequence = pg.execute(
+                    "SELECT pg_get_serial_sequence(%s, 'id') AS sequence",
                     ("public." + table,),
-                )
+                ).fetchone()["sequence"]
+                # Some tables (e.g. candidate_profile) use a fixed primary key,
+                # not a generated sequence. Only reset sequences that exist.
+                if sequence:
+                    pg.execute(
+                        sql.SQL("SELECT setval(%s, GREATEST(COALESCE((SELECT MAX(id) FROM {}), 1), 1), "
+                                "EXISTS(SELECT 1 FROM {}))").format(quoted_table, quoted_table),
+                        (sequence,),
+                    )
         print("\nMigration copy completed. Verify row counts and application behavior before switching traffic.")
         print("No source rows were deleted. The script does not guarantee a full backup; retain the SQLite file.")
 
