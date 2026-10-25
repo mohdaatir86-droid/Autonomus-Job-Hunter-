@@ -15,6 +15,8 @@ from job_sources import hunt_jobs, get_stats, list_jobs, set_job_status
 from gmail_alerts import build_auth_url, exchange_code, get_gmail_status, init_gmail_db
 from ai_assist import ai_status
 from notify import notify_status, send_whatsapp
+from database import postgres_enabled
+
 from application_workflow import (
     init_workflow_db,
     get_profile,
@@ -27,6 +29,8 @@ from application_workflow import (
 )
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+# HTTPX logs full request URLs; SerpApi keys are query parameters, so suppress those URLs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("job-hunter")
 
 
@@ -127,6 +131,7 @@ def health():
     return {
         "status": "ok",
         "service": "autonomous-job-hunter",
+        "database_mode": "postgresql" if postgres_enabled() else "sqlite",
         "time": datetime.now(timezone.utc).isoformat(),
         "live_applications_enabled": False,
         "application_preparation_enabled": True,
