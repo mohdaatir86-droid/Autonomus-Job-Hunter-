@@ -1,13 +1,12 @@
 import json
 import os
 import re
-import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 
 from pypdf import PdfReader
 
-DB_PATH = os.getenv("DATABASE_PATH", "job_hunter.db")
+from database import connect as db_connect, postgres_enabled
+from job_hunter import DB_PATH
 
 DEFAULT_PROFILE = {
     "full_name": "Syed Aatir Hussain",
@@ -36,35 +35,30 @@ def _now():
 
 
 def _connect():
-    path = Path(DB_PATH)
-    if str(DB_PATH) != ":memory:":
-        path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=30000")
-    return conn
+    return db_connect(DB_PATH)
 
 
 def init_workflow_db():
     with _connect() as conn:
-        conn.execute("""CREATE TABLE IF NOT EXISTS candidate_profile (
-            id INTEGER PRIMARY KEY CHECK(id=1), full_name TEXT DEFAULT '', email TEXT DEFAULT '',
-            phone TEXT DEFAULT '', linkedin_url TEXT DEFAULT '', headline TEXT DEFAULT '',
-            experience_summary TEXT DEFAULT '', skills TEXT DEFAULT '[]', resume_text TEXT DEFAULT '',
-            resume_filename TEXT DEFAULT '', updated_at TEXT NOT NULL
-        )""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS application_drafts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL UNIQUE,
-            status TEXT NOT NULL DEFAULT 'prepared', tailored_headline TEXT NOT NULL,
-            keyword_checklist TEXT NOT NULL, resume_guidance TEXT NOT NULL,
-            cover_letter TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
-        )""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS application_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, draft_id INTEGER NOT NULL,
-            event TEXT NOT NULL, note TEXT DEFAULT '', created_at TEXT NOT NULL,
-            FOREIGN KEY(draft_id) REFERENCES application_drafts(id) ON DELETE CASCADE
-        )""")
+        if not postgres_enabled():
+            conn.execute("""CREATE TABLE IF NOT EXISTS candidate_profile (
+                id INTEGER PRIMARY KEY CHECK(id=1), full_name TEXT DEFAULT '', email TEXT DEFAULT '',
+                phone TEXT DEFAULT '', linkedin_url TEXT DEFAULT '', headline TEXT DEFAULT '',
+                experience_summary TEXT DEFAULT '', skills TEXT DEFAULT '[]', resume_text TEXT DEFAULT '',
+                resume_filename TEXT DEFAULT '', updated_at TEXT NOT NULL
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS application_drafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL UNIQUE,
+                status TEXT NOT NULL DEFAULT 'prepared', tailored_headline TEXT NOT NULL,
+                keyword_checklist TEXT NOT NULL, resume_guidance TEXT NOT NULL,
+                cover_letter TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS application_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, draft_id INTEGER NOT NULL,
+                event TEXT NOT NULL, note TEXT DEFAULT '', created_at TEXT NOT NULL,
+                FOREIGN KEY(draft_id) REFERENCES application_drafts(id) ON DELETE CASCADE
+            )""")
         row = conn.execute("SELECT full_name, email FROM candidate_profile WHERE id=1").fetchone()
         if row is None:
             conn.execute(
