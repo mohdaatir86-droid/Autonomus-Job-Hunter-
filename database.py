@@ -1,4 +1,4 @@
-"""Small SQLite/PostgreSQL compatibility layer used by Job Hunter.
+""""Small SQLite/PostgreSQL compatibility layer used by Job Hunter.
 
 Set DATABASE_URL in the hosting environment to enable PostgreSQL. Without it,
 the app uses SQLite at DATABASE_PATH (default: ./job_hunter.db).
@@ -53,6 +53,14 @@ class PgCursor:
     def fetchall(self):
         return [self._row(row) for row in self._cursor.fetchall()]
 
+    def __iter__(self):
+        """Allow SQLite-style iteration over execute() results."""
+        while True:
+            row = self.fetchone()
+            if row is None:
+                break
+            yield row
+
     @property
     def rowcount(self):
         return self._cursor.rowcount
@@ -79,20 +87,17 @@ class PgConnection:
 
     @staticmethod
     def _sql(sql):
-        # Translate the SQLite-only INSERT OR IGNORE idiom.
-        ignore_insert = bool(re.search(r"(?i)\bINSERT\s+OR\s+IGNORE\s+INTO\b", sql))
+        ignore_insert = bool(re.search(r"(?i)\\bINSERT\\s+OR\\s+IGNORE\\s+INTO\\b", sql))
         if ignore_insert:
-            sql = re.sub(r"(?i)\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT INTO", sql)
-            if not re.search(r"(?i)\bON\s+CONFLICT\b", sql):
+            sql = re.sub(r"(?i)\\bINSERT\\s+OR\\s+IGNORE\\s+INTO\\b", "INSERT INTO", sql)
+            if not re.search(r"(?i)\\bON\\s+CONFLICT\\b", sql):
                 sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
 
-        # Existing app query: date(COALESCE(posted_at, first_seen_at)) >= date('now', ?)
         sql = re.sub(
-            r"(?i)date\(COALESCE\(posted_at,\s*first_seen_at\)\)\s*>=\s*date\('now',\s*\?\)",
+            r"(?i)date\\(COALESCE\\(posted_at,\\s*first_seen_at\\)\\)\\s*>=\\s*date\\('now',\\s*\\?\\)",
             "COALESCE(posted_at, first_seen_at)::date >= (CURRENT_DATE + (%s)::interval)",
             sql,
         )
-        # Replace parameter markers outside quoted SQL strings.
         out, i, quote = [], 0, None
         while i < len(sql):
             ch = sql[i]
@@ -180,7 +185,6 @@ def database_diagnostics():
             counts = {}
             for table in expected_tables:
                 if table in existing:
-                    # Table names are fixed constants, not user input.
                     counts[table] = conn.execute(
                         "SELECT COUNT(*) FROM " + table
                     ).fetchone()[0]
@@ -193,7 +197,6 @@ def database_diagnostics():
             "row_counts": counts,
         }
     except Exception as exc:
-        # Never return connection URLs, credentials, or driver exception details.
         return {
             "ok": False,
             "mode": mode,
