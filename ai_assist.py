@@ -47,12 +47,12 @@ async def _chat(system: str, user: str, max_tokens: int = 900) -> str | None:
                 },
             )
             if r.status_code >= 400:
-                log.warning("AI API error %s: %s", r.status_code, r.text[:200])
+                log.warning("AI API request failed with HTTP %s", r.status_code)
                 return None
             data = r.json()
             return (data.get("choices") or [{}])[0].get("message", {}).get("content") or None
-    except Exception:
-        log.exception("AI request failed")
+    except Exception as exc:
+        log.warning("AI request failed (%s)", type(exc).__name__)
         return None
 
 
