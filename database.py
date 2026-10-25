@@ -1,4 +1,4 @@
-""""Small SQLite/PostgreSQL compatibility layer used by Job Hunter.
+"""Small SQLite/PostgreSQL compatibility layer used by Job Hunter.
 
 Set DATABASE_URL in the hosting environment to enable PostgreSQL. Without it,
 the app uses SQLite at DATABASE_PATH (default: ./job_hunter.db).
