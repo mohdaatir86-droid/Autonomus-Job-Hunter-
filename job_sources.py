@@ -194,7 +194,7 @@ async def fetch_serpapi_google_jobs(client, limit):
     if not api_key:
         return [], "SERPAPI_API_KEY not set"
     out, errors = [], []
-    queries = SERPAPI_QUERIES[:6]
+    queries = SERPAPI_QUERIES[:3]
     per_q = max(5, min(20, limit // max(1, len(queries))))
     for q in queries:
         try:
