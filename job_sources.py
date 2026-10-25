@@ -209,7 +209,7 @@ async def fetch_serpapi_google_jobs(client, limit):
     out, errors = [], []
     # Balance scheduled searches across India and Gulf target markets.
     # The old first-three slice only searched India, excluding Gulf roles.
-    queries = SERPAPI_QUERIES[:2] + SERPAPI_QUERIES[8:10]
+    queries = SERPAPI_QUERIES[:3] + SERPAPI_QUERIES[8:10] + SERPAPI_QUERIES[5:6]
     per_q = max(5, min(20, limit // max(1, len(queries))))
     for q in queries:
         try:
