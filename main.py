@@ -77,6 +77,44 @@ async def lifespan(app: FastAPI):
                 coalesce=True,
                 next_run_time=datetime.now(timezone.utc),
             )
+            async def scheduled_application_preparation():
+                try:
+                    policy = get_automation_settings()
+                    if not policy.get("enabled"):
+                        return
+                    candidates = list_jobs(
+                        min_score=policy["min_score"],
+                        status=None,
+                        limit=policy["max_per_run"],
+                    )
+                    prepared_count = 0
+                    skipped_count = 0
+                    for job in candidates:
+                        if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant"}:
+                            skipped_count += 1
+                            continue
+                        try:
+                            draft = await create_application_draft(int(job["id"]))
+                            if draft:
+                                prepared_count += 1
+                        except Exception:
+                            log.exception("Scheduled application draft failed for job %s", job.get("id"))
+                    log.info(
+                        "Scheduled application preparation finished: enabled=%s candidates=%s prepared=%s skipped=%s submission_enabled=false",
+                        policy.get("enabled"), len(candidates), prepared_count, skipped_count,
+                    )
+                except Exception:
+                    log.exception("Scheduled application preparation failed")
+
+            scheduler.add_job(
+                scheduled_application_preparation,
+                "interval",
+                minutes=max(15, int(os.getenv("APPLICATION_PREP_INTERVAL_MINUTES", "30"))),
+                id="application-preparation",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
             scheduler.start()
             app.state.scheduler = scheduler
             log.info("Job discovery scheduler started; interval=%s minutes", minutes)
