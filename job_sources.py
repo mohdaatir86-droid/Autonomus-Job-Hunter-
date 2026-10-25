@@ -525,7 +525,7 @@ def get_stats():
                 + placeholders
                 + ") GROUP BY country ORDER BY count DESC",
                 allowed,
-            )
+            ).fetchall()
         ]
         by_source = [
             dict(row)
@@ -534,7 +534,7 @@ def get_stats():
                 + placeholders
                 + ") GROUP BY source ORDER BY count DESC",
                 allowed,
-            )
+            ).fetchall()
         ]
     return {
         "total_jobs": total,
