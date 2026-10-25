@@ -16,6 +16,7 @@ from gmail_alerts import build_auth_url, exchange_code, get_gmail_status, init_g
 from ai_assist import ai_status, generate_form_answers
 from notify import notify_status, send_whatsapp
 from database import postgres_enabled, database_diagnostics
+from automation_settings import init_automation_settings, get_automation_settings, save_automation_settings
 
 from application_workflow import (
     init_workflow_db,
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
     init_db()
     init_workflow_db()
     init_gmail_db()
+    init_automation_settings()
     if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -112,6 +114,7 @@ async def protect_private_candidate_data(request, call_next):
         or path == "/api/auto-apply"
         or path.startswith("/api/auto-apply/")
         or path == "/api/auto-fill"
+        or path == "/api/automation/settings"
     )
     if protected and request.method != "OPTIONS":
         expected = os.getenv("PORTAL_ACCESS_TOKEN", "").strip()
@@ -276,6 +279,54 @@ def update_job_status(job_id: int, payload: dict[str, Any]):
     return result
 
 
+@app.get("/api/automation/settings")
+def automation_settings():
+    """Return the user's persisted automation policy. Submission remains hard-disabled."""
+    return get_automation_settings()
+
+
+@app.post("/api/automation/settings")
+def update_automation_settings(payload: dict[str, Any]):
+    """Save pre-approved automation rules; never enables live submission."""
+    try:
+        return save_automation_settings(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/automation/prepare")
+async def automation_prepare():
+    """Run one policy-controlled preparation pass; this only creates drafts."""
+    policy = get_automation_settings()
+    if not policy.get("enabled"):
+        raise HTTPException(status_code=409, detail="Automation mode is OFF. Enable it in the dashboard first.")
+    candidates = list_jobs(min_score=policy["min_score"], status=None, limit=policy["max_per_run"])
+    prepared, skipped, errors = [], [], []
+    for job in candidates:
+        if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant"}:
+            skipped.append({"job_id": job.get("id"), "reason": "job already actioned"})
+            continue
+        try:
+            draft = await create_application_draft(int(job["id"]))
+            if draft:
+                prepared.append({
+                    "draft_id": draft.get("id"), "job_id": job.get("id"),
+                    "title": job.get("title"), "company": job.get("company"),
+                    "match_score": job.get("match_score"), "status": draft.get("status", "prepared"),
+                    "url": job.get("url"),
+                })
+        except Exception as exc:
+            log.exception("Automation preparation failed for job %s", job.get("id"))
+            errors.append({"job_id": job.get("id"), "error": str(exc)[:180]})
+    return {
+        "status": "prepared_only", "enabled": True,
+        "threshold": policy["min_score"], "candidate_count": len(candidates),
+        "prepared_count": len(prepared), "prepared": prepared, "skipped": skipped, "errors": errors,
+        "auto_submit_enabled": False,
+        "message": "Automation policy is active, but this deployment has no authenticated browser worker. Drafts only; no applications were submitted."
+    }
+
+
 @app.post("/api/auto-fill")
 async def ai_auto_fill(payload: dict[str, Any]):
     """Return suggested values for visible job-application fields. Never submits a form."""
@@ -344,7 +395,8 @@ async def upload_resume(file: UploadFile = File(...)):
 @app.post("/api/auto-apply/queue")
 async def auto_apply_queue():
     """Prepare a review queue for high-match jobs; never submits applications automatically."""
-    candidates = list_jobs(min_score=80, status=None, limit=25)
+    policy = get_automation_settings()
+    candidates = list_jobs(min_score=policy["min_score"], status=None, limit=policy["max_per_run"])
     prepared, skipped, errors = [], [], []
     for job in candidates:
         if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant"}:
@@ -368,14 +420,15 @@ async def auto_apply_queue():
             errors.append({"job_id": job.get("id"), "error": str(exc)[:180]})
     return {
         "status": "prepared_for_review",
-        "threshold": 80,
+        "threshold": policy["min_score"],
         "candidate_count": len(candidates),
         "prepared_count": len(prepared),
         "prepared": prepared,
         "skipped": skipped,
         "errors": errors,
         "automatic_submission_enabled": False,
-        "message": "Drafts prepared only. Review each application and submit on the employer website yourself."
+        "automation_policy_enabled": policy["enabled"],
+        "message": "Drafts only. This deployment has no authenticated browser worker; no application was submitted."
     }
 
 @app.get("/api/applications")
@@ -455,7 +508,7 @@ def intelligence():
             "score": "Profile-weighted match for Cluster/QSR/dark-store ops",
             "prepare": "AI cover letter + resume guidance when AI_API_KEY is set",
             "notify": "WhatsApp on new jobs with score >= WHATSAPP_MIN_SCORE",
-            "apply": "You review draft and submit the application yourself",
+            "apply": "Policy-controlled draft preparation; live submission disabled until a compliant authenticated browser worker is deployed",
         },
     }
 
