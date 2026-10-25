@@ -2,14 +2,14 @@ import json
 import logging
 import os
 import re
-import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
+
+from database import connect as db_connect, postgres_enabled
 
 log = logging.getLogger("job-hunter")
 DB_PATH = os.getenv("DATABASE_PATH", "job_hunter.db")
-DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman"]
+DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"]
 DEFAULT_TITLES = [
     "Senior Cluster Manager", "Cluster Manager", "City Operations Manager",
     "Operations Manager", "Head of Operations", "Regional Operations Manager",
@@ -42,17 +42,31 @@ def now_iso():
 
 
 def connect():
-    db_path = Path(DB_PATH)
-    if str(DB_PATH) != ":memory:":
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    return db_connect(DB_PATH)
 
 
 def init_db():
+    if postgres_enabled():
+        # PostgreSQL schema is provisioned through the Supabase migration.
+        with connect() as conn:
+            for key, value in DEFAULT_SETTINGS.items():
+                conn.execute(
+                    "INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)",
+                    (key, json.dumps(value)),
+                )
+            row = conn.execute("SELECT value FROM settings WHERE key='target_countries'").fetchone()
+            if row:
+                try:
+                    saved = json.loads(row["value"])
+                except (TypeError, json.JSONDecodeError):
+                    saved = []
+                if "Canada" not in saved:
+                    saved.append("Canada")
+                    conn.execute(
+                        "UPDATE settings SET value=? WHERE key='target_countries'",
+                        (json.dumps(saved),),
+                    )
+        return
     with connect() as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, source_id TEXT,
