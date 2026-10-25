@@ -43,7 +43,7 @@ def is_target_market_job(job, country=None):
     if any(term in location for term in INDIA_TARGET_LOCATION_TERMS):
         return True
     import re
-    return bool(re.search(r"(^|[^a-z])u\\.?p\\.?([^a-z]|$)", location))
+    return bool(re.search(r"(^|[^a-z])u\.?p\.?([^a-z]|$)", location))
 
 SERPAPI_QUERIES = [
     "Cluster Manager India",
