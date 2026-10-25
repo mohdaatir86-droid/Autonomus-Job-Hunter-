@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from job_hunter import get_settings, save_settings, init_db
 from job_sources import hunt_jobs, get_stats, list_jobs, set_job_status
-from gmail_alerts import build_auth_url, exchange_code, get_gmail_status, init_gmail_db
+from gmail_alerts import build_auth_url, exchange_code, get_gmail_status, init_gmail_db, verify_oauth_state
 from ai_assist import ai_status
 from notify import notify_status, send_whatsapp
 from database import postgres_enabled, database_diagnostics
@@ -371,11 +371,13 @@ def gmail_auth():
 
 
 @app.get("/api/gmail/callback")
-async def gmail_callback(code: str | None = None, error: str | None = None):
+async def gmail_callback(code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
         raise HTTPException(status_code=400, detail="Google OAuth error: " + error)
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
+    if not verify_oauth_state(state):
+        raise HTTPException(status_code=400, detail="OAuth state is invalid or expired. Start Gmail connection again.")
     try:
         result = await exchange_code(code)
     except Exception as exc:
