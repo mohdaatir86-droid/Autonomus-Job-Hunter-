@@ -58,10 +58,10 @@ async def send_whatsapp(text: str) -> dict[str, Any]:
             async with httpx.AsyncClient(timeout=25) as client:
                 r = await client.get(url)
             ok = r.status_code < 400
-            return {"sent": ok, "provider": "callmebot", "status_code": r.status_code, "body": r.text[:120]}
+            return {"sent": ok, "provider": "callmebot", "status_code": r.status_code, "body": "accepted" if ok else "provider rejected request"}
         except Exception as e:
-            log.exception("CallMeBot failed")
-            return {"sent": False, "provider": "callmebot", "error": str(e)[:200]}
+            log.warning("CallMeBot failed (%s)", type(e).__name__)
+            return {"sent": False, "provider": "callmebot", "error": "provider request failed"}
 
     sid = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
     token = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
@@ -75,10 +75,10 @@ async def send_whatsapp(text: str) -> dict[str, Any]:
                     auth=(sid, token),
                     data={"From": from_wa, "To": to, "Body": text},
                 )
-            return {"sent": r.status_code < 300, "provider": "twilio", "status_code": r.status_code, "body": r.text[:120]}
+            return {"sent": r.status_code < 300, "provider": "twilio", "status_code": r.status_code, "body": "accepted" if r.status_code < 300 else "provider rejected request"}
         except Exception as e:
-            log.exception("Twilio failed")
-            return {"sent": False, "provider": "twilio", "error": str(e)[:200]}
+            log.warning("Twilio failed (%s)", type(e).__name__)
+            return {"sent": False, "provider": "twilio", "error": "provider request failed"}
 
     return {"sent": False, "error": "No WhatsApp provider configured"}
 
