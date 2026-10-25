@@ -17,6 +17,7 @@ from ai_assist import ai_status, generate_form_answers
 from notify import notify_status, send_whatsapp
 from database import postgres_enabled, database_diagnostics
 from automation_settings import init_automation_settings, get_automation_settings, save_automation_settings
+from browser_worker import run_application_worker
 
 from application_workflow import (
     init_workflow_db,
@@ -469,6 +470,17 @@ async def auto_apply_queue():
         "message": "Drafts only. This deployment has no authenticated browser worker; no application was submitted."
     }
 
+@app.post("/api/automation/apply/{draft_id}")
+async def automation_apply_draft(draft_id: int, payload: dict[str, Any] | None = None):
+    """Run guarded ATS browser workflow. Submission requires BROWSER_ALLOW_SUBMIT=true."""
+    payload = payload or {}
+    dry_run = bool(payload.get("dry_run", True))
+    if not dry_run and os.getenv("BROWSER_ALLOW_SUBMIT", "false").lower() != "true":
+        raise HTTPException(status_code=409, detail="Live submission is disabled. Configure and test the browser worker first.")
+    result = await run_application_worker(draft_id, dry_run=dry_run)
+    return result
+
+
 @app.get("/api/applications")
 def application_drafts():
     return {"items": list_application_drafts(), "automatic_submission_enabled": False}
@@ -546,7 +558,7 @@ def intelligence():
             "score": "Profile-weighted match for Cluster/QSR/dark-store ops",
             "prepare": "AI cover letter + resume guidance when AI_API_KEY is set",
             "notify": "WhatsApp on new jobs with score >= WHATSAPP_MIN_SCORE",
-            "apply": "Policy-controlled draft preparation; live submission disabled until a compliant authenticated browser worker is deployed",
+            "apply": "Guarded Greenhouse/Lever browser worker; live submission is opt-in and requires browser runtime configuration",
         },
     }
 
