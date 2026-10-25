@@ -114,7 +114,7 @@ async def protect_private_candidate_data(request, call_next):
         or path == "/api/auto-apply"
         or path.startswith("/api/auto-apply/")
         or path == "/api/auto-fill"
-        or path == "/api/automation/settings"
+        or path.startswith("/api/automation/")
     )
     if protected and request.method != "OPTIONS":
         expected = os.getenv("PORTAL_ACCESS_TOKEN", "").strip()
