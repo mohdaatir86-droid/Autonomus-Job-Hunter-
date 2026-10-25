@@ -71,9 +71,12 @@ class PgConnection:
     @staticmethod
     def _sql(sql):
         # Translate the small set of SQLite-specific syntax used by this app.
-        sql = re.sub(r"(?i)INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", sql)
-        if re.search(r"(?i)INSERT\s+OR\s+IGNORE", sql):
-            sql = re.sub(r"(?i)INSERT\s+OR\s+IGNORE", "INSERT", sql)
+        ignore_insert = bool(re.search(r"(?i)INSERT\\s+OR\\s+IGNORE\\s+INTO", sql))
+        if ignore_insert:
+            sql = re.sub(r"(?i)INSERT\\s+OR\\s+IGNORE\\s+INTO", "INSERT INTO", sql)
+            if "ON CONFLICT" not in sql.upper():
+                sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+        sql = re.sub(r"(?i)INSERT\s+OR\s+IGNORE", "INSERT", sql)
             if "ON CONFLICT" not in sql.upper():
                 sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
         sql = re.sub(
