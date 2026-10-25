@@ -87,17 +87,20 @@ class PgConnection:
 
     @staticmethod
     def _sql(sql):
-        ignore_insert = bool(re.search(r"(?i)\\bINSERT\\s+OR\\s+IGNORE\\s+INTO\\b", sql))
+        # Translate SQLite's INSERT OR IGNORE idiom to PostgreSQL.
+        ignore_insert = bool(re.search(r"(?i)\bINSERT\s+OR\s+IGNORE\s+INTO\b", sql))
         if ignore_insert:
-            sql = re.sub(r"(?i)\\bINSERT\\s+OR\\s+IGNORE\\s+INTO\\b", "INSERT INTO", sql)
-            if not re.search(r"(?i)\\bON\\s+CONFLICT\\b", sql):
+            sql = re.sub(r"(?i)\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT INTO", sql)
+            if not re.search(r"(?i)\bON\s+CONFLICT\b", sql):
                 sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
 
+        # Convert SQLite relative-date filtering to PostgreSQL interval syntax.
         sql = re.sub(
-            r"(?i)date\\(COALESCE\\(posted_at,\\s*first_seen_at\\)\\)\\s*>=\\s*date\\('now',\\s*\\?\\)",
+            r"(?i)date\(COALESCE\(posted_at,\s*first_seen_at\)\)\s*>=\s*date\('now',\s*\?\)",
             "COALESCE(posted_at, first_seen_at)::date >= (CURRENT_DATE + (%s)::interval)",
             sql,
         )
+        # Translate ? placeholders while preserving string literals and identifiers.
         out, i, quote = [], 0, None
         while i < len(sql):
             ch = sql[i]
