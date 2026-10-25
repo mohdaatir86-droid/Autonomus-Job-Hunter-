@@ -207,7 +207,9 @@ async def fetch_serpapi_google_jobs(client, limit):
     if not api_key:
         return [], "SERPAPI_API_KEY not set"
     out, errors = [], []
-    queries = SERPAPI_QUERIES[:3]
+    # Balance scheduled searches across India and Gulf target markets.
+    # The old first-three slice only searched India, excluding Gulf roles.
+    queries = SERPAPI_QUERIES[:2] + SERPAPI_QUERIES[8:10]
     per_q = max(5, min(20, limit // max(1, len(queries))))
     for q in queries:
         try:
