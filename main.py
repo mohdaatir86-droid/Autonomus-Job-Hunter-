@@ -47,7 +47,22 @@ async def lifespan(app: FastAPI):
             minutes = max(10, int(os.getenv("HUNT_INTERVAL_MINUTES", "15")))
 
             async def scheduled_hunt():
-                await hunt_jobs()
+                try:
+                    result = await hunt_jobs()
+                    errors = result.get("errors") or []
+                    log.info(
+                        "Scheduled hunt completed: fetched=%s new=%s updated=%s sources=%s errors=%s",
+                        result.get("fetched", 0),
+                        result.get("new_jobs", 0),
+                        result.get("updated_jobs", 0),
+                        len(result.get("sources") or []),
+                        len(errors),
+                    )
+                    if errors:
+                        log.warning("Scheduled hunt source errors: %s", errors[:10])
+                except Exception:
+                    log.exception("Scheduled hunt failed")
+                    raise
 
             scheduler.add_job(
                 scheduled_hunt,
