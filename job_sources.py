@@ -154,9 +154,22 @@ def _clean_job(raw, source):
 
 
 async def _get_json(client, url, params=None):
-    response = await client.get(url, params=params, timeout=30, follow_redirects=True)
+    response = await client.get(url, params=params, timeout=20, follow_redirects=True)
     response.raise_for_status()
     return response.json()
+
+
+def _safe_source_error(exc):
+    """Summarize provider failures without leaking request URLs or query-string API keys."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    if isinstance(exc, httpx.TimeoutException):
+        return "request timed out"
+    if isinstance(exc, httpx.RequestError):
+        return "network/request error"
+    if isinstance(exc, (ValueError, json.JSONDecodeError)):
+        return "invalid JSON response"
+    return type(exc).__name__
 
 
 async def fetch_arbeitnow(client, limit):
@@ -239,8 +252,9 @@ async def fetch_serpapi_google_jobs(client, limit):
                         job["source"] = f"Google Jobs / {via}"[:80]
                     out.append(job)
         except Exception as e:
-            log.exception("SerpApi query failed: %s", q)
-            errors.append(f"SerpApi[{q[:40]}]: {str(e)[:160]}")
+            summary = _safe_source_error(e)
+            log.warning("SerpApi query failed (%s): %s", q[:40], summary)
+            errors.append(f"SerpApi[{q[:40]}]: {summary}")
     return out, ("; ".join(errors) if errors else None)
 
 
@@ -273,8 +287,9 @@ async def fetch_greenhouse(client, limit):
                 if job:
                     out.append(job)
         except Exception as e:
-            log.exception("Greenhouse %s failed", board)
-            errors.append(f"Greenhouse/{board}: {str(e)[:120]}")
+            summary = _safe_source_error(e)
+            log.warning("Greenhouse board %s failed: %s", board, summary)
+            errors.append(f"Greenhouse/{board}: {summary}")
     return out, ("; ".join(errors) if errors else None)
 
 
@@ -303,8 +318,9 @@ async def fetch_lever(client, limit):
                 if job:
                     out.append(job)
         except Exception as e:
-            log.exception("Lever %s failed", site)
-            errors.append(f"Lever/{site}: {str(e)[:120]}")
+            summary = _safe_source_error(e)
+            log.warning("Lever board %s failed: %s", site, summary)
+            errors.append(f"Lever/{site}: {summary}")
     return out, ("; ".join(errors) if errors else None)
 
 
@@ -320,8 +336,9 @@ async def fetch_public_sources(settings):
             try:
                 results.extend(await coro)
             except Exception as e:
-                log.exception("%s failed", name)
-                errors.append(f"{name}: {str(e)[:200]}")
+                summary = _safe_source_error(e)
+                log.warning("%s source failed: %s", name, summary)
+                errors.append(f"{name}: {summary}")
 
         serps, serr = await fetch_serpapi_google_jobs(client, limit)
         results.extend(serps)
@@ -346,8 +363,9 @@ async def fetch_public_sources(settings):
             if gmail_err:
                 errors.append(gmail_err)
         except Exception as e:
-            log.exception("Gmail alerts failed")
-            errors.append("Gmail: " + str(e)[:200])
+            summary = _safe_source_error(e)
+            log.warning("Gmail alerts failed: %s", summary)
+            errors.append("Gmail: " + summary)
 
     return results, errors
 
@@ -409,8 +427,9 @@ async def hunt_jobs():
         from notify import notify_high_match_jobs
         notify_result = await notify_high_match_jobs(notify_jobs)
     except Exception as e:
-        log.exception("WhatsApp notify failed")
-        notify_result = {"sent": False, "error": str(e)[:200]}
+        summary = _safe_source_error(e)
+        log.warning("WhatsApp notify failed: %s", summary)
+        notify_result = {"sent": False, "error": summary}
     return {
         "status": "completed",
         "started_at": started,
