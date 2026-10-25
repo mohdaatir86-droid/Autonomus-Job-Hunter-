@@ -48,7 +48,22 @@ a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}bu
     <div class="stat-card"><div class="stat-label">Last discovery</div><div class="stat-value" id="statLast" style="font-size:18px;margin-top:13px">—</div><div class="stat-note" id="statLastNote">Run status</div></div>
   </section>
   <nav class="tabs" id="mainTabs"><button class="tab active" data-tab="jobs" onclick="switchTab('jobs')">Job matches</button><button class="tab" data-tab="sources" onclick="switchTab('sources')">Sources</button><button class="tab" data-tab="coverage" onclick="switchTab('coverage')">Coverage</button></nav>
-  <section id="tab-jobs"><div class="panel">
+  <section id="tab-jobs">
+  <div class="panel" style="margin-bottom:16px">
+    <div class="panel-header"><div><div class="panel-title">AI form-fill assistant (iPhone Safari)</div><div class="panel-sub">Install the bookmarklet below, then open a job application page in Safari and tap the bookmark. It fills supported fields only; it never submits.</div></div><span class="pill">Beta</span></div>
+    <div class="panel-body">
+      <ol style="padding-left:20px;line-height:1.7;font-size:13px;color:var(--text-secondary)">
+        <li>Copy the bookmarklet code below.</li>
+        <li>In Safari, bookmark any page, open Bookmarks → Edit that bookmark, and replace its URL with the copied code (starting with <code>javascript:</code>).</li>
+        <li>Open the employer application form in Safari, tap the bookmark, and enter your Job Hunter portal token when prompted.</li>
+        <li>Review all populated fields. The assistant will not click Submit or bypass CAPTCHA/OTP.</li>
+      </ol>
+      <textarea id="bookmarkletCode" readonly rows="5" style="width:100%;font-size:11px;line-height:1.4;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:var(--text);word-break:break-all" aria-label="AI form fill bookmarklet code"></textarea>
+      <button class="btn btn-primary" style="margin-top:10px" onclick="copyBookmarklet()">Copy bookmarklet code</button>
+      <p style="font-size:11px;color:var(--text-muted);line-height:1.6;margin-top:10px">Works only on ordinary visible fields and compatible Safari pages. Some portals block bookmarklets or use protected embedded forms; use their normal application flow if so. Your token is requested by the bookmarklet and is not saved on the employer website.</p>
+    </div>
+  </div>
+  <div class="panel">
     <div class="panel-header"><div><div class="panel-title">Best-fit opportunities</div><div class="panel-sub">High-match roles first. Open the original listing before applying.</div></div><span class="pill" id="jobCountBadge">Loading…</span></div>
     <div class="search-row"><input class="search-input" id="jobSearch" type="search" placeholder="Search title, company, city or keyword…" onkeydown="if(event.key==='Enter')loadJobs()"><button class="btn btn-primary btn-sm" onclick="loadJobs()">Search</button><button class="btn btn-ghost btn-sm" onclick="resetFilters()">Reset</button></div>
     <div class="filters-row">
@@ -67,6 +82,8 @@ a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}bu
 </main>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script>
+const JOB_HUNTER_BOOKMARKLET = "javascript:(async()=>{try{const t=prompt('Job Hunter portal access token');if(!t)return;const es=[...document.querySelectorAll('input,textarea,select')].filter(e=>{const ty=(e.type||'text').toLowerCase();return !e.disabled&&!e.readOnly&&e.getClientRects().length&&['text','email','tel','url','search','textarea','select-one'].includes(e.tagName==='TEXTAREA'?'textarea':e.tagName==='SELECT'?'select-one':ty)});if(!es.length){alert('No supported visible fields found');return}const fs=es.map((e,i)=>{e.dataset.jhAfId=String(i);const l=[...(e.labels||[])].map(x=>x.innerText).join(' ');return{id:String(i),label:(l||e.getAttribute('aria-label')||e.placeholder||e.name||e.id||'Field '+(i+1)).slice(0,250),name:e.name||'',type:e.tagName==='TEXTAREA'?'textarea':e.tagName==='SELECT'?'select-one':e.type||'text',placeholder:e.placeholder||'',required:!!e.required,options:e.tagName==='SELECT'?[...e.options].map(o=>o.text).slice(0,40):[]}});const r=await fetch('https://autonomous-job-hunter.onrender.com/api/auto-fill',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({page_url:location.href,page_title:document.title,fields:fs})});const d=await r.json();if(!r.ok)throw Error(d.detail||('HTTP '+r.status));let n=0;for(const e of es){const v=d.answers?.[e.dataset.jhAfId];if(typeof v!=='string'||!v.trim())continue;if(e.tagName==='SELECT'){const o=[...e.options].find(x=>x.text.trim().toLowerCase()===v.trim().toLowerCase()||x.value.trim().toLowerCase()===v.trim().toLowerCase());if(!o)continue;e.value=o.value}else e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));n++}alert('AI suggested and filled '+n+' field(s). Review every answer. Nothing was submitted.')}catch(e){alert('Job Hunter form fill: '+e.message)}})();";
+function copyBookmarklet(){const el=document.getElementById('bookmarkletCode');el.value=JOB_HUNTER_BOOKMARKLET;el.focus();el.select();try{document.execCommand('copy');toast('Bookmarklet copied. Paste it into a Safari bookmark URL.','success')}catch(e){toast('Code selected. Copy it manually.','error')}}
 function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
 function ago(v){if(!v)return"Not run yet";const d=new Date(v);if(isNaN(d.getTime()))return"Recently";const m=Math.max(0,Math.floor((Date.now()-d.getTime())/60000));if(m<1)return"Just now";if(m<60)return m+" min ago";const h=Math.floor(m/60);return h<24?h+" hr ago":Math.floor(h/24)+"d ago"}
 function toast(msg,type){const el=document.getElementById("toast");el.textContent=msg;el.className="toast show "+(type||"");clearTimeout(window._toastT);window._toastT=setTimeout(()=>el.classList.remove("show"),3400)}
@@ -112,6 +129,7 @@ function resetFilters(){document.getElementById("jobSearch").value="";document.g
 async function loadCoverage(){try{const jobs=await api("/api/jobs?limit=200&min_score=0"),items=jobs.items||jobs||[],countries={},sources={};items.forEach(j=>{const c=j.country||"Unspecified",s=j.source||"Unknown";countries[c]=(countries[c]||0)+1;sources[s]=(sources[s]||0)+1});document.getElementById("countryCoverage").innerHTML=Object.entries(countries).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<div class="coverage-item"><strong>'+esc(k)+'</strong><span>'+v+' listings</span></div>').join("")||'<span style="color:var(--muted)">No data yet</span>';document.getElementById("sourceCoverage").innerHTML=Object.entries(sources).sort((a,b)=>b[1]-a[1]).slice(0,16).map(([k,v])=>'<div class="coverage-item"><strong>'+esc(k)+'</strong><span>'+v+' listings</span></div>').join("")||'<span style="color:var(--muted)">No data yet</span>'}catch(e){console.warn("coverage",e)}}
 async function runHunt(){const btn=document.getElementById("huntBtn");btn.disabled=true;btn.textContent="Running…";toast("Job hunt started");try{const res=await api("/api/hunt",{method:"POST"});toast("Hunt done · "+(res.new_jobs||0)+" new jobs found","success");await loadAll()}catch(e){toast("Hunt failed: "+e.message,"error")}finally{btn.disabled=false;btn.textContent="⌕ Run job hunt"}}
 async function loadAll(){await Promise.all([loadStats(),loadSources(),loadJobs(),loadCoverage()])}
+document.getElementById("bookmarkletCode").value=JOB_HUNTER_BOOKMARKLET;
 setInterval(()=>{loadStats();loadSources()},180000);loadAll();
 </script>
 </body>
