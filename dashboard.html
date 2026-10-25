@@ -37,7 +37,7 @@ a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}bu
   <div class="top-actions"><span class="sync-status" id="syncStatus">Checking…</span>
   <button class="btn btn-secondary" aria-label="Refresh dashboard data" onclick="loadAll()">↻ Refresh</button>
   <button class="btn btn-primary" id="huntBtn" aria-label="Run job discovery" onclick="runHunt()">⌕ Run job hunt</button>
-  <button class="btn btn-secondary" id="autoApplyBtn" aria-label="Prepare AI application drafts" onclick="runAutoApplyQueue()">AI Apply Queue</button></div>
+  <button class="btn btn-secondary" id="autoApplyBtn" aria-label="Prepare AI application drafts" onclick="runAutoApplyQueue()">AI Apply Queue</button><button class="btn btn-secondary" onclick="changePortalToken()">Change token</button></div>
 </header>
 <main class="container">
   <section class="hero"><div class="eyebrow">Your next move starts here</div><h2>Find the right role.<br>Make every application count.</h2><p>Your career command centre for operations leadership roles across selected North India markets and the Gulf. Prioritise high-fit openings, prepare tailored applications, and review each submission before applying.</p><div class="hero-meta"><span class="pill" id="sourcePill"><span class="live-dot"></span><span id="sourceCount">— sources</span></span><span class="pill" id="lastRunPill">Last run: —</span></div></section>
@@ -89,6 +89,7 @@ function getPortalToken(){
  return token;
 }
 function clearPortalToken(){try{window.localStorage.removeItem(PORTAL_TOKEN_STORAGE_KEY);}catch(e){}}
+function changePortalToken(){clearPortalToken();const token=window.prompt("Enter the correct Job Hunter portal access token. It will replace the saved token on this device.");if(!token||!token.trim()){toast("Token not changed","error");return;}try{window.localStorage.setItem(PORTAL_TOKEN_STORAGE_KEY,token.trim());toast("Portal token replaced on this device","success");}catch(e){toast("Could not save token in this browser","error");}}
 async function privateApi(path,opts){
  const token=getPortalToken();if(!token)throw new Error("Access token required");
  const options=opts||{};options.headers={...(options.headers||{}),Authorization:"Bearer "+token};
