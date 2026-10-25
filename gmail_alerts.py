@@ -10,15 +10,14 @@ import json
 import logging
 import os
 import re
-import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 import httpx
 
 from job_hunter import DB_PATH, normalize_text, detect_country
+from database import connect as db_connect, postgres_enabled
 
 log = logging.getLogger("job-hunter")
 
@@ -51,16 +50,12 @@ def _now():
 
 
 def _connect():
-    path = Path(DB_PATH)
-    if str(DB_PATH) != ":memory:":
-        path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=30000")
-    return conn
+    return db_connect(DB_PATH)
 
 
 def init_gmail_db():
+    if postgres_enabled():
+        return  # PostgreSQL tables are created by the Supabase schema migration.
     with _connect() as conn:
         conn.execute(
             """CREATE TABLE IF NOT EXISTS gmail_tokens (
