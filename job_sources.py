@@ -24,7 +24,26 @@ from job_hunter import (
 
 log = logging.getLogger("job-hunter")
 
-LISTABLE_COUNTRIES = list(DEFAULT_COUNTRIES) + ["Remote / Unspecified", "Unspecified"]
+GULF_COUNTRIES = ["United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Bahrain"]
+LISTABLE_COUNTRIES = ["India"] + GULF_COUNTRIES
+
+INDIA_TARGET_LOCATION_TERMS = (
+    "delhi", "ncr", "gurgaon", "gurugram", "noida", "greater noida",
+    "dehradun", "uttar pradesh", "uttarakhand", "chandigarh",
+    "ghaziabad", "faridabad", "manesar",
+)
+
+def is_target_market_job(job, country=None):
+    location = normalize_text(job.get("location")).lower()
+    market = country or detect_country(location, job.get("title", ""), job.get("description", ""))
+    if market in GULF_COUNTRIES:
+        return True
+    if market != "India":
+        return False
+    if any(term in location for term in INDIA_TARGET_LOCATION_TERMS):
+        return True
+    import re
+    return bool(re.search(r"(^|[^a-z])u\\.?p\\.?([^a-z]|$)", location))
 
 SERPAPI_QUERIES = [
     "Cluster Manager India",
@@ -344,7 +363,7 @@ async def hunt_jobs():
     with connect() as conn:
         for job in fetched:
             score, reasons, country = score_job(job, settings)
-            if country not in LISTABLE_COUNTRIES:
+            if country not in LISTABLE_COUNTRIES or not is_target_market_job(job, country):
                 continue
             sources_touched.add(job.get("source") or "?")
             job["match_score"] = score
@@ -422,8 +441,9 @@ def list_jobs(
     else:
         allowed = LISTABLE_COUNTRIES
     placeholders = ",".join("?" for _ in allowed)
-    clauses = ["match_score >= ?", "country IN (" + placeholders + ")"]
-    params: list[Any] = [min_score, *allowed]
+    india_location_clause = "(" + " OR ".join(["lower(location) LIKE ?" for _ in INDIA_TARGET_LOCATION_TERMS] + ["lower(location) LIKE ?"]) + ")"
+    clauses = ["match_score >= ?", "country IN (" + placeholders + ")", "(country != 'India' OR " + india_location_clause + ")"]
+    params: list[Any] = [min_score, *allowed, *["%" + term + "%" for term in INDIA_TARGET_LOCATION_TERMS], "%up%"]
     if status:
         clauses.append("status = ?")
         params.append(status)
