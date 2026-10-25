@@ -9,7 +9,7 @@ from database import connect as db_connect, postgres_enabled
 
 log = logging.getLogger("job-hunter")
 DB_PATH = os.getenv("DATABASE_PATH", "job_hunter.db")
-DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"]
+DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Bahrain"]
 DEFAULT_TITLES = [
     "Senior Cluster Manager", "Cluster Manager", "City Operations Manager",
     "Operations Manager", "Head of Operations", "Regional Operations Manager",
@@ -60,11 +60,10 @@ def init_db():
                     saved = json.loads(row["value"])
                 except (TypeError, json.JSONDecodeError):
                     saved = []
-                if "Canada" not in saved:
-                    saved.append("Canada")
+                if set(saved) != set(DEFAULT_COUNTRIES):
                     conn.execute(
                         "UPDATE settings SET value=? WHERE key='target_countries'",
-                        (json.dumps(saved),),
+                        (json.dumps(DEFAULT_COUNTRIES),),
                     )
         return
     with connect() as conn:
@@ -91,9 +90,7 @@ def init_db():
                 saved = json.loads(row["value"])
             except (TypeError, json.JSONDecodeError):
                 saved = []
-            if "Canada" in saved and set(saved) <= {
-                "India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"
-            }:
+            if set(saved) != set(DEFAULT_COUNTRIES):
                 conn.execute(
                     "UPDATE settings SET value=? WHERE key='target_countries'",
                     (json.dumps(DEFAULT_COUNTRIES),),
@@ -140,7 +137,7 @@ def detect_country(location, title="", description=""):
         ("Oman", ["oman", "muscat", "salalah"]),
         ("Canada", ["canada", "toronto", "vancouver", "montreal", "calgary", "ottawa", "edmonton"]),
         ("Bahrain", ["bahrain", "manama"]),
-        ("India", ["india", "new delhi", "delhi", "gurugram", "gurgaon", "noida", "mumbai", "bengaluru", "bangalore", "hyderabad", "pune", "chennai", "faridabad", "jaipur", "lucknow"]),
+        ("India", ["india", "new delhi", "delhi", "ncr", "gurugram", "gurgaon", "noida", "greater noida", "dehradun", "uttarakhand", "uttar pradesh", "chandigarh", "ghaziabad", "faridabad", "manesar", "mumbai", "bengaluru", "bangalore", "hyderabad", "pune", "chennai", "jaipur", "lucknow"]),
         ("United States", ["united states", "usa", "u.s.a.", "new york", "san francisco", "seattle", "austin"]),
         ("United Kingdom", ["united kingdom", "uk", "london", "manchester"]),
         ("Singapore", ["singapore"]),
