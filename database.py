@@ -1,7 +1,4 @@
-"""SQLite/PostgreSQL compatibility layer for Job Hunter.
-
-Set DATABASE_URL to enable PostgreSQL. If absent, the existing SQLite path is retained.
-"""
+"""SQLite/PostgreSQL compatibility layer for Job Hunter."""
 from __future__ import annotations
 
 import os
@@ -70,17 +67,13 @@ class PgConnection:
 
     @staticmethod
     def _sql(sql):
-        # Translate the small set of SQLite-specific syntax used by this app.
         ignore_insert = bool(re.search(r"(?i)INSERT\\s+OR\\s+IGNORE\\s+INTO", sql))
         if ignore_insert:
             sql = re.sub(r"(?i)INSERT\\s+OR\\s+IGNORE\\s+INTO", "INSERT INTO", sql)
             if "ON CONFLICT" not in sql.upper():
                 sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
-        sql = re.sub(r"(?i)INSERT\s+OR\s+IGNORE", "INSERT", sql)
-            if "ON CONFLICT" not in sql.upper():
-                sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
         sql = re.sub(
-            r"(?i)date\(COALESCE\(posted_at, first_seen_at\)\)\s*>=\s*date\('now',\s*\?\)",
+            r"(?i)date\\(COALESCE\\(posted_at, first_seen_at\\)\\)\\s*>=\\s*date\\('now',\\s*\\?\\)",
             "COALESCE(posted_at, first_seen_at)::date >= (CURRENT_DATE + (?)::interval)",
             sql,
         )
@@ -96,7 +89,6 @@ class PgConnection:
 def connect(db_path=None):
     url = os.getenv("DATABASE_URL", "").strip()
     if url:
-        # psycopg 3 handles Supabase PostgreSQL. SSL is required for remote DBs.
         import psycopg
         from psycopg.rows import tuple_row
         if url.startswith("postgres://"):
@@ -107,7 +99,7 @@ def connect(db_path=None):
         if not parts.query:
             url = urlunsplit((parts.scheme, parts.netloc, parts.path, "sslmode=require", parts.fragment))
         elif "sslmode=" not in parts.query:
-            url = url + ("&" if "?" in url else "?") + "sslmode=require"
+            url += ("&" if "?" in url else "?") + "sslmode=require"
         raw = psycopg.connect(url, connect_timeout=15, row_factory=tuple_row)
         return PgConnection(raw)
 
