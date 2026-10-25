@@ -10,6 +10,9 @@ import json
 import logging
 import os
 import re
+import secrets
+import hashlib
+import hmac
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
@@ -96,9 +99,21 @@ def _redirect_uri() -> str:
     ).strip()
 
 
-def build_auth_url(state: str = "jobhunter") -> str:
+def _oauth_state_secret() -> str:
+    return (os.getenv("OAUTH_STATE_SECRET") or os.getenv("PORTAL_ACCESS_TOKEN") or "").strip()
+
+
+def build_auth_url(state: str | None = None) -> str:
     if not gmail_configured():
         raise ValueError("Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in environment")
+    secret = _oauth_state_secret()
+    if not secret:
+        raise ValueError("Set OAUTH_STATE_SECRET in Render before connecting Gmail")
+    nonce = secrets.token_urlsafe(24)
+    issued = str(int(datetime.now(timezone.utc).timestamp()))
+    payload = f"{issued}.{nonce}"
+    signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    signed_state = f"{payload}.{signature}"
     params = {
         "client_id": os.getenv("GOOGLE_CLIENT_ID").strip(),
         "redirect_uri": _redirect_uri(),
@@ -106,9 +121,25 @@ def build_auth_url(state: str = "jobhunter") -> str:
         "scope": "https://www.googleapis.com/auth/gmail.readonly",
         "access_type": "offline",
         "prompt": "consent",
-        "state": state,
+        "state": signed_state,
     }
     return GOOGLE_AUTH + "?" + urlencode(params)
+
+
+def verify_oauth_state(state: str | None) -> bool:
+    secret = _oauth_state_secret()
+    if not secret or not state:
+        return False
+    try:
+        issued, nonce, supplied = state.split(".", 2)
+        age = int(datetime.now(timezone.utc).timestamp()) - int(issued)
+        if age < 0 or age > 600 or len(nonce) < 16:
+            return False
+        payload = f"{issued}.{nonce}"
+        expected = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, supplied)
+    except (ValueError, TypeError):
+        return False
 
 
 async def exchange_code(code: str) -> dict[str, Any]:
@@ -198,7 +229,7 @@ async def _access_token() -> str | None:
             },
         )
         if r.status_code >= 400:
-            log.error("token refresh failed: %s", r.text[:200])
+            log.warning("Gmail token refresh failed with HTTP %s", r.status_code)
             return token or None
         data = r.json()
     new_token = data.get("access_token") or token
@@ -339,7 +370,7 @@ async def fetch_jobs_from_gmail() -> tuple[list[dict], str | None]:
             params={"q": q, "maxResults": 25},
         )
         if r.status_code >= 400:
-            return [], f"Gmail list failed: {r.status_code} {r.text[:150]}"
+            return [], f"Gmail list failed: HTTP {r.status_code}"
         ids = [m["id"] for m in (r.json().get("messages") or [])]
         jobs: list[dict] = []
         for mid in ids:
