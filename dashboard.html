@@ -41,6 +41,24 @@ a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}bu
 </header>
 <main class="container">
   <section class="hero"><div class="eyebrow">Your next move starts here</div><h2>Find the right role.<br>Make every application count.</h2><p>Your career command centre for operations leadership roles across selected North India markets and the Gulf. Prioritise high-fit openings, prepare tailored applications, and review each submission before applying.</p><div class="hero-meta"><span class="pill" id="sourcePill"><span class="live-dot"></span><span id="sourceCount">— sources</span></span><span class="pill" id="lastRunPill">Last run: —</span></div></section>
+  <section class="panel" id="automationPanel" style="margin-bottom:24px">
+    <div class="panel-header">
+      <div><div class="panel-title">Automation Mode</div><div class="panel-sub">Save your pre-approved job rules and prepare drafts in one pass. Live submission is currently unavailable until a secure, compliant browser worker is deployed.</div></div>
+      <span class="pill setup" id="automationState">OFF · Draft preparation only</span>
+    </div>
+    <div class="panel-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;align-items:end">
+        <label style="display:flex;gap:10px;align-items:center;font-weight:700;font-size:13px"><input id="automationEnabled" type="checkbox" style="width:18px;height:18px"> Enable automation policy</label>
+        <label style="font-size:12px;font-weight:700;color:var(--text-secondary)">Minimum match score (50–100)<input id="automationMinScore" type="number" min="50" max="100" value="80" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid var(--border);border-radius:10px;background:white"></label>
+        <label style="font-size:12px;font-weight:700;color:var(--text-secondary)">Maximum drafts per run (1–50)<input id="automationMaxRun" type="number" min="1" max="50" value="10" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid var(--border);border-radius:10px;background:white"></label>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+        <button class="btn btn-primary" id="saveAutomationBtn" onclick="saveAutomationSettings()">Save automation rules</button>
+        <button class="btn btn-ghost" id="runAutomationBtn" onclick="runAutomationPreparation()">Run preparation now</button>
+      </div>
+      <p id="automationNote" style="margin-top:14px;color:var(--text-secondary);font-size:12px;line-height:1.65">Safety rules: no invented answers; pause for CAPTCHA/OTP, unknown required answers and legal declarations. No form is submitted by this version.</p>
+    </div>
+  </section>
   <section class="stats" aria-label="Overview">
     <div class="stat-card"><div class="stat-label">Jobs in pipeline</div><div class="stat-value" id="statTotal">—</div><div class="stat-note">Across enabled sources</div></div>
     <div class="stat-card"><div class="stat-label">New opportunities</div><div class="stat-value" id="statNew">—</div><div class="stat-note">Not yet actioned</div></div>
@@ -112,6 +130,47 @@ async function privateApi(path,opts){
  const options=opts||{};options.headers={...(options.headers||{}),Authorization:"Bearer "+token};
  try{return await api(path,options);}catch(e){if(String(e.message).includes("401"))clearPortalToken();throw e;}
 }
+async function loadAutomationSettings(){
+ try{
+  const p=await privateApi("/api/automation/settings");
+  document.getElementById("automationEnabled").checked=!!p.enabled;
+  document.getElementById("automationMinScore").value=p.min_score||80;
+  document.getElementById("automationMaxRun").value=p.max_per_run||10;
+  const state=document.getElementById("automationState");
+  state.textContent=p.enabled?"POLICY ON · DRAFTS ONLY":"OFF · Draft preparation only";
+  state.className="pill "+(p.enabled?"ready":"setup");
+  document.getElementById("automationNote").textContent="Saved: "+(p.updated_at||"not yet saved")+" · "+(p.execution_status||"policy_only_no_browser_worker")+". CAPTCHA/OTP, unknown required answers and legal declarations always pause. Live submission remains disabled.";
+ }catch(e){document.getElementById("automationNote").textContent="Automation settings require the private portal token. "+e.message;}
+}
+async function saveAutomationSettings(){
+ const btn=document.getElementById("saveAutomationBtn");btn.disabled=true;
+ try{
+  const payload={
+   enabled:document.getElementById("automationEnabled").checked,
+   min_score:Number(document.getElementById("automationMinScore").value),
+   max_per_run:Number(document.getElementById("automationMaxRun").value),
+   pause_on_captcha_otp:true,
+   pause_on_unknown_required_answer:true,
+   pause_on_legal_declaration:true
+  };
+  const p=await privateApi("/api/automation/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+  toast("Automation rules saved · live submission still disabled","success");
+  document.getElementById("automationState").textContent=p.enabled?"POLICY ON · DRAFTS ONLY":"OFF · Draft preparation only";
+  document.getElementById("automationState").className="pill "+(p.enabled?"ready":"setup");
+  await loadAutomationSettings();
+ }catch(e){toast("Could not save automation rules: "+e.message,"error");}
+ finally{btn.disabled=false;}
+}
+async function runAutomationPreparation(){
+ const btn=document.getElementById("runAutomationBtn");btn.disabled=true;btn.textContent="Preparing…";
+ try{
+  const p=await privateApi("/api/automation/prepare",{method:"POST"});
+  const summary=(p.prepared||[]).slice(0,10).map(x=>"• "+(x.title||"Role")+" — "+(x.company||"Company")+" (score "+(x.match_score??"—")+")").join("\\n");
+  window.alert("Automation preparation complete\\n\\nDrafts prepared: "+(p.prepared_count||0)+"\\nMinimum score: "+p.threshold+"\\n\\n"+(summary||"No eligible jobs found.")+"\\n\\n"+p.message);
+  toast("Prepared "+(p.prepared_count||0)+" drafts; no applications submitted","success");
+ }catch(e){toast("Automation run failed: "+e.message,"error");}
+ finally{btn.disabled=false;btn.textContent="Run preparation now";}
+}
 async function runAutoApplyQueue(){
  const btn=document.getElementById("autoApplyBtn");btn.disabled=true;btn.textContent="Preparing…";
  try{
@@ -128,7 +187,7 @@ function setScore(val,el){document.getElementById("filterScore").value=val;docum
 function resetFilters(){document.getElementById("jobSearch").value="";document.getElementById("filterCountry").value="";document.getElementById("filterScore").value="65";document.getElementById("filterPosted").value="3";document.getElementById("filterStatus").value="";document.querySelectorAll(".chip").forEach(c=>c.classList.toggle("active",c.dataset.score==="65"));loadJobs()}
 async function loadCoverage(){try{const jobs=await api("/api/jobs?limit=200&min_score=0"),items=jobs.items||jobs||[],countries={},sources={};items.forEach(j=>{const c=j.country||"Unspecified",s=j.source||"Unknown";countries[c]=(countries[c]||0)+1;sources[s]=(sources[s]||0)+1});document.getElementById("countryCoverage").innerHTML=Object.entries(countries).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<div class="coverage-item"><strong>'+esc(k)+'</strong><span>'+v+' listings</span></div>').join("")||'<span style="color:var(--muted)">No data yet</span>';document.getElementById("sourceCoverage").innerHTML=Object.entries(sources).sort((a,b)=>b[1]-a[1]).slice(0,16).map(([k,v])=>'<div class="coverage-item"><strong>'+esc(k)+'</strong><span>'+v+' listings</span></div>').join("")||'<span style="color:var(--muted)">No data yet</span>'}catch(e){console.warn("coverage",e)}}
 async function runHunt(){const btn=document.getElementById("huntBtn");btn.disabled=true;btn.textContent="Running…";toast("Job hunt started");try{const res=await api("/api/hunt",{method:"POST"});toast("Hunt done · "+(res.new_jobs||0)+" new jobs found","success");await loadAll()}catch(e){toast("Hunt failed: "+e.message,"error")}finally{btn.disabled=false;btn.textContent="⌕ Run job hunt"}}
-async function loadAll(){await Promise.all([loadStats(),loadSources(),loadJobs(),loadCoverage()])}
+async function loadAll(){await Promise.all([loadStats(),loadSources(),loadJobs(),loadCoverage(),loadAutomationSettings()])}
 document.getElementById("bookmarkletCode").value=JOB_HUNTER_BOOKMARKLET;
 setInterval(()=>{loadStats();loadSources()},180000);loadAll();
 </script>
