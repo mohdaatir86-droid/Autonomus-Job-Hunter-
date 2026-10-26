@@ -65,6 +65,18 @@ def init_db():
                         "UPDATE settings SET value=? WHERE key='target_countries'",
                         (json.dumps(DEFAULT_COUNTRIES),),
                     )
+            title_row = conn.execute("SELECT value FROM settings WHERE key='target_titles'").fetchone()
+            if title_row:
+                try:
+                    saved_titles = json.loads(title_row["value"])
+                except (TypeError, json.JSONDecodeError):
+                    saved_titles = []
+                if "Program Manager" not in saved_titles:
+                    saved_titles.append("Program Manager")
+                    conn.execute(
+                        "UPDATE settings SET value=? WHERE key='target_titles'",
+                        (json.dumps(saved_titles),),
+                    )
         return
     with connect() as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS jobs (
@@ -94,6 +106,18 @@ def init_db():
                 conn.execute(
                     "UPDATE settings SET value=? WHERE key='target_countries'",
                     (json.dumps(DEFAULT_COUNTRIES),),
+                )
+        title_row = conn.execute("SELECT value FROM settings WHERE key='target_titles'").fetchone()
+        if title_row:
+            try:
+                saved_titles = json.loads(title_row["value"])
+            except (TypeError, json.JSONDecodeError):
+                saved_titles = []
+            if "Program Manager" not in saved_titles:
+                saved_titles.append("Program Manager")
+                conn.execute(
+                    "UPDATE settings SET value=? WHERE key='target_titles'",
+                    (json.dumps(saved_titles),),
                 )
 
 
