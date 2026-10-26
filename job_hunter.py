@@ -129,7 +129,7 @@ def get_settings():
         **DEFAULT_SETTINGS,
         **values,
         "live_applications_enabled": False,
-        "hunt_interval_minutes": max(15, int(os.getenv("HUNT_INTERVAL_MINUTES", "15"))),
+        "hunt_interval_minutes": max(10, int(os.getenv("HUNT_INTERVAL_MINUTES", "15"))),
     }
 
 
@@ -190,6 +190,7 @@ def score_job(job, settings):
         (["head of operations", "director of operations", "regional operations manager", "regional operations"], 40, "Regional or head-of-operations leadership"),
         (["qsr operations", "multi-unit operations", "multi unit operations", "restaurant operations manager"], 38, "QSR / multi-unit operations leadership"),
         (["operations manager", "general manager operations", "operations head"], 34, "Operations management"),
+        (["program manager", "programme manager"], 32, "Program management"),
         (["warehouse manager", "fulfilment manager", "fulfillment manager", "fulfillment operations", "warehouse operations manager"], 34, "Warehouse/fulfilment leadership"),
         (["supply chain manager", "logistics manager", "last mile manager", "last-mile manager", "dark store manager", "store operations manager"], 34, "Supply-chain/logistics leadership"),
         (["operations lead", "logistics lead", "warehouse lead", "fulfilment lead", "fulfillment lead"], 27, "Operations team leadership"),
@@ -252,12 +253,53 @@ def score_job(job, settings):
     }
     if any(country.lower() in aliases.get(target, {target}) for target in countries):
         score += 18
-        reasons.append("Confirmed target-country location")
+        reasons.append("Confirmed: target-country location")
+        if country == "India":
+            preferred_cities = (
+                "noida", "gurugram", "gurgaon", "delhi", "ncr", "chandigarh",
+                "lucknow", "dehradun", "ghaziabad", "faridabad", "greater noida",
+            )
+            if any(city in location for city in preferred_cities):
+                score += 4
+                reasons.append("Confirmed: preferred India operations city")
     elif country == "Remote / Unspecified":
-        reasons.append("Location needs verification")
+        reasons.append("Inferred: location needs verification")
     else:
         score -= 8
         reasons.append("Location not confirmed in target markets")
+    salary_text = normalize_text(job.get("salary"))
+    if salary_text:
+        reasons.append("Confirmed: salary published (" + salary_text[:80] + ")")
+        score += 3
+    else:
+        reasons.append("Inferred: salary was not published and was not used to reject this role")
+    url = normalize_text(job.get("url")).lower()
+    if "google.com/search" in url or "google.com/search?" in url:
+        score -= 4
+        reasons.append("Inferred: link is a Google Jobs wrapper, not a direct application URL")
+    elif url.startswith("http"):
+        score += 2
+        reasons.append("Confirmed: direct listing URL")
+    posted = job.get("posted_at")
+    if posted:
+        try:
+            parsed = datetime.fromisoformat(str(posted).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).days
+            if age_days <= 3:
+                score += 6
+                reasons.append("Confirmed: listed within the last 3 days")
+            elif age_days <= 14:
+                score += 3
+                reasons.append("Confirmed: listed within the last 14 days")
+            elif age_days > 45:
+                score -= 6
+                reasons.append("Listing is older than 45 days")
+        except (TypeError, ValueError):
+            reasons.append("Inferred: posting date could not be verified")
+    else:
+        reasons.append("Inferred: source did not provide a posting date")
     if any(x in title for x in ["senior", "lead", "head", "regional", "director", "manager", "chief"]):
         score += 8
         reasons.append("Leadership seniority")

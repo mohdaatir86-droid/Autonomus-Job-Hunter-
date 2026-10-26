@@ -83,19 +83,38 @@ def get_gmail_status() -> dict[str, Any]:
     with _connect() as conn:
         row = conn.execute("SELECT email, token_expiry, refresh_token FROM gmail_tokens WHERE id=1").fetchone()
     connected = bool(row and (row["refresh_token"] or row["email"]))
+    missing = []
+    if not os.getenv("GOOGLE_CLIENT_ID", "").strip():
+        missing.append("GOOGLE_CLIENT_ID")
+    if not os.getenv("GOOGLE_CLIENT_SECRET", "").strip():
+        missing.append("GOOGLE_CLIENT_SECRET")
+    if not _oauth_state_secret():
+        missing.append("OAUTH_STATE_SECRET or PORTAL_ACCESS_TOKEN")
+    hint = (
+        "Create a Google Cloud OAuth client (Web application) with redirect URI "
+        + _redirect_uri()
+        + ". Enable the Gmail API. Set the missing variable names in Render, then open /api/gmail/auth. "
+        "Create job alerts on Naukri, LinkedIn, Shine, Indeed, Bayt and GulfTalent to that Gmail."
+    )
+    if gmail_configured() and not missing and not connected:
+        hint = "OAuth credentials are set. Open /api/gmail/auth and approve read-only Gmail access. No password is requested."
+    elif connected:
+        hint = "Connected. New job-alert emails are imported on the next hunt and are not imported twice."
     return {
         "oauth_configured": gmail_configured(),
         "connected": connected,
         "email": (row["email"] if row else "") or "",
         "callback_url": _redirect_uri(),
-        "hint": "Create job alerts on Naukri / LinkedIn / Shine / Monster / Bayt to this Gmail. Connect OAuth, then hunt will ingest new alert emails.",
+        "missing": missing,
+        "setup_required": bool(missing) or not connected,
+        "hint": hint,
     }
 
 
 def _redirect_uri() -> str:
     return os.getenv(
         "GOOGLE_REDIRECT_URI",
-        "https://autonomous-job-hunter.onrender.com/api/gmail/callback",
+        "https://autonomous-job-hunter-docker.onrender.com/api/gmail/callback",
     ).strip()
 
 
@@ -144,20 +163,31 @@ def verify_oauth_state(state: str | None) -> bool:
 
 async def exchange_code(code: str) -> dict[str, Any]:
     if not gmail_configured():
-        raise ValueError("Google OAuth not configured")
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            GOOGLE_TOKEN,
-            data={
-                "code": code,
-                "client_id": os.getenv("GOOGLE_CLIENT_ID").strip(),
-                "client_secret": os.getenv("GOOGLE_CLIENT_SECRET").strip(),
-                "redirect_uri": _redirect_uri(),
-                "grant_type": "authorization_code",
-            },
-        )
-        r.raise_for_status()
-        data = r.json()
+        return {"ok": False, "error": "Google OAuth is not configured"}
+    if not code:
+        return {"ok": False, "error": "Missing authorization code"}
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                GOOGLE_TOKEN,
+                data={
+                    "code": code,
+                    "client_id": os.getenv("GOOGLE_CLIENT_ID").strip(),
+                    "client_secret": os.getenv("GOOGLE_CLIENT_SECRET").strip(),
+                    "redirect_uri": _redirect_uri(),
+                    "grant_type": "authorization_code",
+                },
+            )
+            if r.status_code >= 400:
+                log.warning("Gmail code exchange failed with HTTP %s", r.status_code)
+                return {"ok": False, "error": f"Google token exchange failed: HTTP {r.status_code}"}
+            data = r.json()
+    except httpx.TimeoutException:
+        return {"ok": False, "error": "Google token exchange timed out"}
+    except httpx.RequestError:
+        return {"ok": False, "error": "Google token exchange network error"}
+    except (ValueError, json.JSONDecodeError):
+        return {"ok": False, "error": "Google token exchange returned invalid JSON"}
     init_gmail_db()
     email = await _fetch_profile_email(data.get("access_token", ""))
     expiry = ""
@@ -178,7 +208,7 @@ async def exchange_code(code: str) -> dict[str, Any]:
                  updated_at=excluded.updated_at""",
             (data.get("access_token"), data.get("refresh_token"), expiry, email, _now()),
         )
-    return {"connected": True, "email": email}
+    return {"ok": True, "connected": True, "email": email}
 
 
 async def _fetch_profile_email(access_token: str) -> str:
@@ -356,10 +386,10 @@ def _extract_jobs_from_email(subject: str, from_header: str, body: str, message_
 async def fetch_jobs_from_gmail() -> tuple[list[dict], str | None]:
     """Pull recent job-alert messages and convert to job dicts."""
     if not gmail_configured():
-        return [], None
+        return [], "GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set"
     token = await _access_token()
     if not token:
-        return [], "Gmail not connected — visit /api/gmail/auth after setting Google OAuth env vars"
+        return [], "Gmail not connected — open /api/gmail/auth after setting Google OAuth env vars"
     init_gmail_db()
     from_q = " OR ".join(f"from:{d}" for d in ALERT_SENDERS[:8])
     q = f"({from_q}) OR subject:(job alert OR jobs for you OR recommended jobs)"
@@ -369,6 +399,10 @@ async def fetch_jobs_from_gmail() -> tuple[list[dict], str | None]:
             headers={"Authorization": f"Bearer {token}"},
             params={"q": q, "maxResults": 25},
         )
+        if r.status_code in (401, 403):
+            return [], f"Gmail list failed: HTTP {r.status_code}"
+        if r.status_code == 429:
+            return [], "Gmail list failed: HTTP 429"
         if r.status_code >= 400:
             return [], f"Gmail list failed: HTTP {r.status_code}"
         ids = [m["id"] for m in (r.json().get("messages") or [])]
@@ -378,20 +412,23 @@ async def fetch_jobs_from_gmail() -> tuple[list[dict], str | None]:
                 seen = conn.execute("SELECT 1 FROM gmail_seen_messages WHERE message_id=?", (mid,)).fetchone()
             if seen:
                 continue
-            mr = await client.get(
-                GMAIL_API + f"/messages/{mid}",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"format": "full"},
-            )
-            if mr.status_code >= 400:
-                continue
-            msg = mr.json()
-            headers = {h["name"].lower(): h["value"] for h in (msg.get("payload") or {}).get("headers") or []}
-            subject = headers.get("subject", "")
-            from_h = headers.get("from", "")
-            body = _decode_body(msg.get("payload") or {})
-            extracted = _extract_jobs_from_email(subject, from_h, body, mid)
-            jobs.extend(extracted)
+            try:
+                mr = await client.get(
+                    GMAIL_API + f"/messages/{mid}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"format": "full"},
+                )
+                if mr.status_code >= 400:
+                    continue
+                msg = mr.json()
+                headers = {h["name"].lower(): h["value"] for h in (msg.get("payload") or {}).get("headers") or []}
+                subject = headers.get("subject", "")
+                from_h = headers.get("from", "")
+                body = _decode_body(msg.get("payload") or {})
+                extracted = _extract_jobs_from_email(subject, from_h, body, mid)
+                jobs.extend(extracted)
+            except Exception:
+                log.warning("Skipped malformed Gmail message %s", mid[:16])
             with _connect() as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO gmail_seen_messages(message_id, seen_at) VALUES (?,?)",

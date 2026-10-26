@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
                     prepared_count = 0
                     skipped_count = 0
                     for job in candidates:
-                        if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant"}:
+                        if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant", "closed"}:
                             skipped_count += 1
                             continue
                         try:
@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Autonomous Job Hunter",
-    version="0.5.0",
+    version="0.6.0",
     description="Job Hunter: discovery, drafts, guarded Greenhouse/Lever browser apply (opt-in). Authenticated boards discovery-only.",
     lifespan=lifespan,
 )
@@ -204,6 +204,8 @@ def health():
         "database_mode": "postgresql" if postgres_enabled() else "sqlite",
         "time": datetime.now(timezone.utc).isoformat(),
         "live_applications_enabled": False,
+        "browser_submit_enabled": os.getenv("BROWSER_ALLOW_SUBMIT", "false").lower() == "true",
+        "admin_endpoints_locked": bool(os.getenv("PORTAL_ACCESS_TOKEN", "").strip()),
         "application_preparation_enabled": True,
         "resume_profile_configured": get_profile().get("has_resume", False),
         "browser_worker_enabled": os.getenv("BROWSER_WORKER_ENABLED", "false").lower() == "true",
@@ -237,6 +239,7 @@ def jobs(
     status: str | None = None,
     posted_within_days: int | None = Query(default=None, ge=1, le=365),
     q: str | None = Query(default=None, max_length=120),
+    source: str | None = Query(default=None, max_length=80),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -250,6 +253,7 @@ def jobs(
             limit=limit,
             offset=offset,
             q=q,
+            source=source,
         )
     }
 
@@ -317,7 +321,7 @@ def update_settings(payload: dict[str, Any]):
 @app.post("/api/jobs/{job_id}/status")
 def update_job_status(job_id: int, payload: dict[str, Any]):
     status = str(payload.get("status", "")).strip().lower()
-    allowed = {"saved", "applied_manually", "interview", "rejected", "offer", "not_relevant"}
+    allowed = {"new", "shortlisted", "saved", "draft_ready", "applied_manually", "interview", "rejected", "offer", "not_relevant", "closed"}
     if status not in allowed:
         raise HTTPException(status_code=422, detail="status must be one of " + ", ".join(sorted(allowed)))
     result = set_job_status(job_id, status)
@@ -347,7 +351,7 @@ async def automation_prepare():
     candidates = list_jobs(min_score=policy["min_score"], status=None, limit=policy["max_per_run"])
     prepared, skipped, errors = [], [], []
     for job in candidates:
-        if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant"}:
+        if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant", "closed"}:
             skipped.append({"job_id": job.get("id"), "reason": "job already actioned"})
             continue
         try:
@@ -440,7 +444,7 @@ async def auto_apply_queue():
     candidates = list_jobs(min_score=policy["min_score"], status=None, limit=policy["max_per_run"])
     prepared, skipped, errors = [], [], []
     for job in candidates:
-        if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant"}:
+        if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant", "closed"}:
             skipped.append({"job_id": job.get("id"), "reason": "job already actioned"})
             continue
         try:
@@ -514,9 +518,10 @@ def gmail_status():
 
 @app.get("/api/gmail/auth")
 def gmail_auth():
-    url = build_auth_url()
-    if not url:
-        raise HTTPException(status_code=503, detail="Gmail OAuth is not configured")
+    try:
+        url = build_auth_url()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
     return RedirectResponse(url)
 
 
@@ -540,42 +545,67 @@ async def notify_test():
 
 @app.get("/api/sources")
 def sources():
+    from job_sources import get_source_report, BUILTIN_GREENHOUSE_BOARDS
+
     gmail = get_gmail_status()
+    report = get_source_report() or {}
+    by_name = {item.get("name"): item for item in (report.get("sources") or [])}
+    greenhouse_env = bool(os.getenv("GREENHOUSE_BOARDS", "").strip())
+    catalog = [
+        {"name": "Arbeitnow", "type": "Public job API", "configured": True, "connection_mode": "Public API, no key"},
+        {"name": "Remotive", "type": "Public job API", "configured": True, "connection_mode": "Public API, operations category"},
+        {"name": "Jobicy", "type": "Public job API", "configured": True, "connection_mode": "Public API, no key"},
+        {
+            "name": "Google Jobs via SerpApi",
+            "type": "Search API",
+            "configured": bool(os.getenv("SERPAPI_API_KEY", "").strip()),
+            "connection_mode": "SERPAPI_API_KEY in Render. A rejected key is Unauthorized, not Ready.",
+        },
+        {
+            "name": "Greenhouse company boards",
+            "type": "Public company ATS API",
+            "configured": True,
+            "connection_mode": "GREENHOUSE_BOARDS" if greenhouse_env else "Built-in public boards: " + ", ".join(BUILTIN_GREENHOUSE_BOARDS),
+        },
+        {
+            "name": "Lever company boards",
+            "type": "Public company ATS API",
+            "configured": bool(os.getenv("LEVER_SITES", "").strip()),
+            "connection_mode": "LEVER_SITES slugs",
+        },
+        {
+            "name": "Gmail job alerts",
+            "type": "Job-alert email",
+            "configured": bool(gmail.get("connected")),
+            "connection_mode": "Google OAuth read-only. Redirect: " + str(gmail.get("callback_url") or ""),
+            "oauth_configured": gmail.get("oauth_configured", False),
+            "gmail_email": gmail.get("email") or None,
+            "auth_url": "/api/gmail/auth",
+            "missing": gmail.get("missing") or [],
+        },
+    ]
+    for item in catalog:
+        live = by_name.get(item["name"]) or {}
+        if live:
+            item["status"] = live.get("status") or "unavailable"
+            item["detail"] = (live.get("detail") or "")[:300]
+            item["fetched"] = live.get("fetched", 0)
+        elif item["configured"]:
+            item["status"] = "unknown"
+            item["detail"] = "No hunt has recorded this source yet"
+            item["fetched"] = 0
+        else:
+            item["status"] = "missing_configuration"
+            item["detail"] = item["connection_mode"]
+            item["fetched"] = 0
+        item["healthy"] = item["status"] == "working"
     return {
-        "sources": [
-            {"name": "Arbeitnow", "type": "Public job API", "configured": True, "connection_mode": "API"},
-            {"name": "Remotive", "type": "Public job API", "configured": True, "connection_mode": "API"},
-            {"name": "Jobicy", "type": "Public job API", "configured": True, "connection_mode": "API"},
-            {
-                "name": "Google Jobs via SerpApi",
-                "type": "Search API (includes Naukri/LinkedIn/Indeed listings)",
-                "configured": bool(os.getenv("SERPAPI_API_KEY", "").strip()),
-                "connection_mode": "SERPAPI_API_KEY",
-            },
-            {
-                "name": "Greenhouse company boards",
-                "type": "Public company ATS API",
-                "configured": bool(os.getenv("GREENHOUSE_BOARDS", "").strip()),
-                "connection_mode": "GREENHOUSE_BOARDS slugs",
-            },
-            {
-                "name": "Lever company boards",
-                "type": "Public company ATS API",
-                "configured": bool(os.getenv("LEVER_SITES", "").strip()),
-                "connection_mode": "LEVER_SITES slugs",
-            },
-            {
-                "name": "Naukri / LinkedIn / Shine / Monster / Bayt / GulfTalent",
-                "type": "Job-alert email via Gmail",
-                "configured": gmail.get("connected", False),
-                "connection_mode": "Connect Gmail OAuth + create job alerts on each site",
-                "oauth_configured": gmail.get("oauth_configured", False),
-                "gmail_email": gmail.get("email") or None,
-                "auth_url": "/api/gmail/auth",
-            },
-        ],
-        "note": "Auto-submit only for verified Greenhouse/Lever after Docker Chromium + BROWSER_ALLOW_SUBMIT. Other boards are discovery-only.",
+        "sources": catalog,
+        "checked_at": report.get("checked_at"),
+        "note": "Submission stays off unless BROWSER_ALLOW_SUBMIT is explicitly true. Ready means the last hunt succeeded for that source.",
         "gmail": gmail,
         "ai": ai_status(),
         "whatsapp": notify_status(),
+        "live_applications_enabled": False,
+        "admin_locked": bool(os.getenv("PORTAL_ACCESS_TOKEN", "").strip()),
     }

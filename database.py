@@ -54,14 +54,6 @@ class PgCursor:
         return [self._row(row) for row in self._cursor.fetchall()]
 
     def __iter__(self):
-        """Permit direct iteration over execute() results like sqlite cursors."""
-        while True:
-            row = self.fetchone()
-            if row is None:
-                break
-            yield row
-
-    def __iter__(self):
         """Allow SQLite-style iteration over execute() results."""
         while True:
             row = self.fetchone()

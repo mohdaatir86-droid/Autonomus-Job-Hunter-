@@ -2,6 +2,7 @@ import json
 import os
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 from pypdf import PdfReader
 
@@ -258,6 +259,21 @@ async def create_application_draft(job_id):
                     ai_used = True
         except Exception:
             pass
+        company = job.get("company") or "the company"
+        recruiter_message = (
+            "Hello — I am interested in the "
+            + title
+            + " role at "
+            + company
+            + ". "
+            + headline
+            + ". Happy to share a short summary of relevant operations experience from my existing profile."
+        )
+        guidance = list(guidance) + [
+            "Recruiter message (edit before sending): " + recruiter_message,
+            "Interview preparation: multi-site operations, SLA ownership, team leadership, store or dark-store launch, inventory and shrinkage. Answer only from confirmed resume facts.",
+            "Requirements snapshot: " + (", ".join(keywords[:8]) if keywords else "Review the original listing; the source did not provide a detailed description."),
+        ]
         now = _now()
         conn.execute(
             """INSERT INTO application_drafts(job_id,status,tailored_headline,keyword_checklist,resume_guidance,cover_letter,created_at,updated_at)
@@ -272,6 +288,10 @@ async def create_application_draft(job_id):
         conn.execute(
             "INSERT INTO application_events(draft_id,event,note,created_at) VALUES (?,?,?,?)",
             (draft["id"], "draft_prepared", note + "; no application submitted.", now),
+        )
+        conn.execute(
+            "UPDATE jobs SET status='draft_ready' WHERE id=? AND status IN ('new','saved','shortlisted')",
+            (job_id,),
         )
     out = _serialize_draft(draft, job)
     out["ai_assisted"] = ai_used

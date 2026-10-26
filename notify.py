@@ -91,7 +91,7 @@ async def notify_high_match_jobs(jobs: list[dict], portal_base: str | None = Non
     if not hits:
         return {"sent": False, "skipped": True, "count": 0, "reason": "no jobs above min score"}
     hits = sorted(hits, key=lambda x: -int(x.get("match_score") or 0))[:5]
-    base = (portal_base or os.getenv("PORTAL_PUBLIC_URL") or "https://autonomous-job-hunter.onrender.com").rstrip("/")
+    base = (portal_base or os.getenv("PORTAL_PUBLIC_URL") or "https://autonomous-job-hunter-docker.onrender.com").rstrip("/")
     lines = [f"Job Hunter: {len(hits)} high-match role(s) for you"]
     for j in hits:
         lines.append(
