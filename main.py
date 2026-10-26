@@ -17,7 +17,9 @@ from ai_assist import ai_status, generate_form_answers
 from notify import notify_status, send_whatsapp
 from database import postgres_enabled, database_diagnostics
 from automation_settings import init_automation_settings, get_automation_settings, save_automation_settings
-from browser_worker import run_application_worker
+from browser_worker import run_application_worker, browser_health_check
+from automation_routes import router as automation_router
+from application_state import init_application_state_db
 
 from application_workflow import (
     init_workflow_db,
@@ -32,7 +34,6 @@ from application_workflow import (
 )
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-# HTTPX logs full request URLs; API keys may be query parameters.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("job-hunter")
 
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     init_workflow_db()
     init_gmail_db()
     init_automation_settings()
+    init_application_state_db()
     if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -78,6 +80,7 @@ async def lifespan(app: FastAPI):
                 coalesce=True,
                 next_run_time=datetime.now(timezone.utc),
             )
+
             async def scheduled_application_preparation():
                 try:
                     policy = get_automation_settings()
@@ -129,10 +132,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Autonomous Job Hunter",
-    version="0.4.1",
-    description="Personal master job hunter: multi-source discovery, AI drafts, WhatsApp alerts. You submit applications manually.",
+    version="0.5.0",
+    description="Job Hunter: discovery, drafts, guarded Greenhouse/Lever browser apply (opt-in). Authenticated boards discovery-only.",
     lifespan=lifespan,
 )
+app.include_router(automation_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
@@ -154,6 +159,9 @@ async def protect_private_candidate_data(request, call_next):
         or path.startswith("/api/auto-apply/")
         or path == "/api/auto-fill"
         or path.startswith("/api/automation/")
+        or path.startswith("/api/application-attempts")
+        or path == "/api/application-state"
+        or path.startswith("/api/portals")
     )
     if protected and request.method != "OPTIONS":
         expected = os.getenv("PORTAL_ACCESS_TOKEN", "").strip()
@@ -198,6 +206,7 @@ def health():
         "live_applications_enabled": False,
         "application_preparation_enabled": True,
         "resume_profile_configured": get_profile().get("has_resume", False),
+        "browser_worker_enabled": os.getenv("BROWSER_WORKER_ENABLED", "false").lower() == "true",
         "gmail": get_gmail_status(),
         "ai": ai_status(),
         "whatsapp": notify_status(),
@@ -206,7 +215,6 @@ def health():
 
 @app.get("/health/db")
 def health_db():
-    """Safe DB diagnostic: reports connectivity/table counts but never secrets."""
     result = database_diagnostics()
     return JSONResponse(status_code=200 if result.get("connected") else 503, content=result)
 
@@ -320,13 +328,11 @@ def update_job_status(job_id: int, payload: dict[str, Any]):
 
 @app.get("/api/automation/settings")
 def automation_settings():
-    """Return the user's persisted automation policy. Submission remains hard-disabled."""
     return get_automation_settings()
 
 
 @app.post("/api/automation/settings")
 def update_automation_settings(payload: dict[str, Any]):
-    """Save pre-approved automation rules; never enables live submission."""
     try:
         return save_automation_settings(payload)
     except ValueError as exc:
@@ -335,7 +341,6 @@ def update_automation_settings(payload: dict[str, Any]):
 
 @app.post("/api/automation/prepare")
 async def automation_prepare():
-    """Run one policy-controlled preparation pass; this only creates drafts."""
     policy = get_automation_settings()
     if not policy.get("enabled"):
         raise HTTPException(status_code=409, detail="Automation mode is OFF. Enable it in the dashboard first.")
@@ -362,13 +367,12 @@ async def automation_prepare():
         "threshold": policy["min_score"], "candidate_count": len(candidates),
         "prepared_count": len(prepared), "prepared": prepared, "skipped": skipped, "errors": errors,
         "auto_submit_enabled": False,
-        "message": "Automation policy is active, but this deployment has no authenticated browser worker. Drafts only; no applications were submitted."
+        "message": "Drafts only until Docker browser is verified and BROWSER_ALLOW_SUBMIT is explicitly enabled.",
     }
 
 
 @app.post("/api/auto-fill")
 async def ai_auto_fill(payload: dict[str, Any]):
-    """Return suggested values for visible job-application fields. Never submits a form."""
     page_url = str(payload.get("page_url", ""))[:1500]
     page_title = str(payload.get("page_title", ""))[:300]
     fields = payload.get("fields", [])
@@ -401,7 +405,7 @@ async def ai_auto_fill(payload: dict[str, Any]):
         "page_title": page_title,
         "answers": answers,
         "filled_count": sum(1 for x in answers.values() if isinstance(x, str) and x.strip()),
-        "note": "Suggested values only. Review every field. The assistant never submits the application."
+        "note": "Suggested values only. Review every field. The assistant never submits the application.",
     }
 
 
@@ -430,10 +434,8 @@ async def upload_resume(file: UploadFile = File(...)):
         await file.close()
 
 
-
 @app.post("/api/auto-apply/queue")
 async def auto_apply_queue():
-    """Prepare a review queue for high-match jobs; never submits applications automatically."""
     policy = get_automation_settings()
     candidates = list_jobs(min_score=policy["min_score"], status=None, limit=policy["max_per_run"])
     prepared, skipped, errors = [], [], []
@@ -467,43 +469,33 @@ async def auto_apply_queue():
         "errors": errors,
         "automatic_submission_enabled": False,
         "automation_policy_enabled": policy["enabled"],
-        "message": "Drafts only. This deployment has no authenticated browser worker; no application was submitted."
+        "message": "Drafts only. Use POST /api/automation/run-browser for Greenhouse/Lever after Docker Chromium is healthy.",
     }
-
-@app.post("/api/automation/apply/{draft_id}")
-async def automation_apply_draft(draft_id: int, payload: dict[str, Any] | None = None):
-    """Run guarded ATS browser workflow. Submission requires BROWSER_ALLOW_SUBMIT=true."""
-    payload = payload or {}
-    dry_run = bool(payload.get("dry_run", True))
-    if not dry_run and os.getenv("BROWSER_ALLOW_SUBMIT", "false").lower() != "true":
-        raise HTTPException(status_code=409, detail="Live submission is disabled. Configure and test the browser worker first.")
-    result = await run_application_worker(draft_id, dry_run=dry_run)
-    return result
-
-
-@app.get("/api/applications")
-def application_drafts():
-    return {"items": list_application_drafts(), "automatic_submission_enabled": False}
 
 
 @app.post("/api/applications/draft/{job_id}")
-async def prepare_application(job_id: int):
+async def draft_application(job_id: int):
     draft = await create_application_draft(job_id)
     if not draft:
         raise HTTPException(status_code=404, detail="job not found")
     return draft
 
 
+@app.get("/api/applications")
+def applications():
+    return {"items": list_application_drafts()}
+
+
 @app.post("/api/applications/{draft_id}/status")
-def update_application_status(draft_id: int, payload: dict[str, Any]):
+def application_status(draft_id: int, payload: dict[str, Any]):
     status = str(payload.get("status", "")).strip().lower()
-    note = str(payload.get("note", ""))
+    note = str(payload.get("note", ""))[:1000]
     try:
-        result = update_draft_status(draft_id, status, note)
+        result = update_draft_status(draft_id, status, note=note)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     if not result:
-        raise HTTPException(status_code=404, detail="application draft not found")
+        raise HTTPException(status_code=404, detail="draft not found")
     return result
 
 
@@ -511,7 +503,7 @@ def update_application_status(draft_id: int, payload: dict[str, Any]):
 def application_events(draft_id: int):
     events = get_draft_events(draft_id)
     if events is None:
-        raise HTTPException(status_code=404, detail="application draft not found")
+        raise HTTPException(status_code=404, detail="draft not found")
     return {"items": events}
 
 
@@ -522,45 +514,20 @@ def gmail_status():
 
 @app.get("/api/gmail/auth")
 def gmail_auth():
-    try:
-        url = build_auth_url()
-    except ValueError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+    url = build_auth_url()
+    if not url:
+        raise HTTPException(status_code=503, detail="Gmail OAuth is not configured")
     return RedirectResponse(url)
 
 
 @app.get("/api/gmail/callback")
-async def gmail_callback(code: str | None = None, state: str | None = None, error: str | None = None):
-    if error:
-        raise HTTPException(status_code=400, detail="Google OAuth error: " + error)
-    if not code:
-        raise HTTPException(status_code=400, detail="Missing authorization code")
+async def gmail_callback(code: str = "", state: str = ""):
     if not verify_oauth_state(state):
-        raise HTTPException(status_code=400, detail="OAuth state is invalid or expired. Start Gmail connection again.")
-    try:
-        result = await exchange_code(code)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)[:300])
-    return {
-        "status": "connected",
-        "email": result.get("email"),
-        "next": "Create job alerts on Naukri, LinkedIn, Shine, Monster, Bayt pointing to this Gmail. Then run Hunt — alerts will be ingested automatically.",
-    }
-
-
-@app.get("/api/intelligence")
-def intelligence():
-    return {
-        "ai": ai_status(),
-        "whatsapp": notify_status(),
-        "plan": {
-            "discover": "SerpApi Google Jobs + Gmail alerts + public APIs + ATS boards",
-            "score": "Profile-weighted match for Cluster/QSR/dark-store ops",
-            "prepare": "AI cover letter + resume guidance when AI_API_KEY is set",
-            "notify": "WhatsApp on new jobs with score >= WHATSAPP_MIN_SCORE",
-            "apply": "Guarded Greenhouse/Lever browser worker; live submission is opt-in and requires browser runtime configuration",
-        },
-    }
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    result = await exchange_code(code)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "oauth failed"))
+    return RedirectResponse("/")
 
 
 @app.post("/api/notify/test")
@@ -607,7 +574,7 @@ def sources():
                 "auth_url": "/api/gmail/auth",
             },
         ],
-        "note": "Boards are not password-scraped. Naukri/LinkedIn/Shine/Monster/Gulf enter via Google Jobs (SerpApi) and Gmail job alerts. Auto-submit remains disabled.",
+        "note": "Auto-submit only for verified Greenhouse/Lever after Docker Chromium + BROWSER_ALLOW_SUBMIT. Other boards are discovery-only.",
         "gmail": gmail,
         "ai": ai_status(),
         "whatsapp": notify_status(),
