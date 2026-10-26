@@ -9,9 +9,9 @@ from database import connect as db_connect, postgres_enabled
 
 log = logging.getLogger("job-hunter")
 DB_PATH = os.getenv("DATABASE_PATH", "job_hunter.db")
-DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Bahrain"]
+DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"]
 DEFAULT_TITLES = [
-    "Senior Cluster Manager", "Cluster Manager", "City Operations Manager",
+    "Senior Cluster Manager", "Cluster Manager", "City Operations Manager", "Program Manager",
     "Operations Manager", "Head of Operations", "Regional Operations Manager",
     "Warehouse Manager", "Fulfilment Manager", "Fulfillment Manager",
     "Dark Store Manager", "Supply Chain Manager", "Last Mile Operations Manager",
