@@ -1,28 +1,59 @@
 # Job Hunter Browser Worker Setup
 
-## Runtime
-The existing Render service was created with the native Python runtime. A Dockerfile is now included to install a Playwright-compatible Chromium runtime. To use it, create/reconfigure a Render Docker web service using this repository's Dockerfile. Do not change the existing service until the new service is healthy and has the required environment variables.
+## Runtime status
 
-## Safe initial configuration
-Set:
-- BROWSER_WORKER_ENABLED=true
-- BROWSER_ALLOW_SUBMIT=false
-- AUTHENTICATED_BOARD_SUBMIT_ENABLED=false
+The **existing** Render service uses the **native Python** runtime. Playwright Chromium cannot be installed there (no root for `playwright install --with-deps`).
 
-The worker stays in dry-run mode by default. Keep BROWSER_ALLOW_SUBMIT=false until a test application flow has been validated end-to-end.
+A Dockerfile is included that uses the official Playwright Python image (`mcr.microsoft.com/playwright/python:v1.64.1-noble`). The `playwright` package is pinned to `1.64.1` to match.
+
+## Safe migration path (do not break the live service)
+
+1. Keep the current Python service running.
+2. Create a **new** Render Web Service → **Docker** from this repository.
+3. Copy every environment variable from the live service (especially `DATABASE_URL` / Postgres, `PORTAL_ACCESS_TOKEN`, AI keys, Gmail OAuth).
+4. Set on the Docker service:
+   - `BROWSER_WORKER_ENABLED=true`
+   - `BROWSER_ALLOW_SUBMIT=false`  (keep false until end-to-end validation)
+   - `AUTHENTICATED_BOARD_SUBMIT_ENABLED=false`
+5. Deploy and open `/health` and `/health/browser`.
+6. Required acceptance: `/health/browser` must report `chromium_launchable: true` and a Chromium version.
+7. Run one Greenhouse or Lever draft in **dry-run** mode only.
+8. Only after confirmation detection works, consider enabling submit for that specific flow.
 
 ## Public ATS forms
-Greenhouse/Lever pages are supported only when the URL is an HTTPS page on the allowlist. CAPTCHA, OTP, login walls, sensitive/legal questions, unknown required fields, and unsupported hosts stop the run.
 
-## Login-required job boards
-Naukri, LinkedIn, Indeed, Foundit, GulfTalent and Bayt require a user-authorized browser session. Do not provide portal passwords or OTPs to the API. Provision a Playwright storage-state JSON file securely into the browser runtime, then set BROWSER_STORAGE_STATE_PATH to its absolute path. Treat this file as a password: it contains session cookies and must never be committed to GitHub or exposed in logs. If the session expires, sign in manually and replace the state file. This app does not bypass CAPTCHA, MFA, access controls, or portal restrictions.
+Greenhouse / Lever public application URLs are allow-listed. The worker:
 
-The authenticated-board submission switch is separate and defaults off. Before enabling it for any portal, verify the portal's current terms, supported form flow, and a successful test submission. LinkedIn/Naukri page structure may change; a generic form filler is not a guarantee of compatibility.
+- Fills only fields that map to the verified candidate profile
+- Stops on CAPTCHA, OTP, login walls, legal/sensitive questions, unknown required fields
+- Never invents work authorization, salary, or demographic answers
+- Requires explicit `BROWSER_ALLOW_SUBMIT=true` to click submit
+- Verifies confirmation text before recording success
+
+## Login-required boards (Naukri, LinkedIn, Indeed, Foundit, GulfTalent, Bayt)
+
+These require a user-authorized Playwright storage-state file. **Do not** paste passwords or OTPs into chat or the API.
+
+1. On a trusted machine, log in manually with Playwright and export `storage_state.json`.
+2. Provision the file into the container via a secret volume or secure upload path.
+3. Set `BROWSER_STORAGE_STATE_PATH` to that absolute path.
+4. Treat the file as a password; never commit it.
+5. Authenticated submission remains off until each portal’s flow is tested independently.
 
 ## Validation checklist
-1. Check /health and Render logs after deployment.
-2. Confirm Playwright can launch Chromium using the Docker runtime.
-3. Run one known Greenhouse/Lever application in dry-run mode.
-4. Confirm the worker stops on required unknown/legal fields.
-5. Confirm authenticated session loads without asking the service for credentials.
-6. Only after all tests pass, consider enabling submission for that specific supported flow.
+
+- [ ] `/health` returns ok
+- [ ] `/health/browser` → `chromium_launchable: true`
+- [ ] `/api/portals` shows accurate capability flags
+- [ ] Dry-run fills Greenhouse/Lever form fields from profile
+- [ ] CAPTCHA / legal fields cause a clean stop + event
+- [ ] Duplicate draft/job does not double-submit
+- [ ] Success notification only after confirmation text is detected
+
+## Safety defaults
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `BROWSER_WORKER_ENABLED` | false | Worker will not start |
+| `BROWSER_ALLOW_SUBMIT` | false | Fill only; no submit click |
+| Live applications | false | Hard-coded in health and policy |
