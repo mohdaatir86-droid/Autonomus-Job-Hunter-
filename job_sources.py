@@ -24,8 +24,8 @@ from job_hunter import (
 
 log = logging.getLogger("job-hunter")
 
-GULF_COUNTRIES = ["United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Bahrain"]
-LISTABLE_COUNTRIES = ["India"] + GULF_COUNTRIES
+GULF_COUNTRIES = ["United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman"]
+LISTABLE_COUNTRIES = ["India"] + GULF_COUNTRIES + ["Canada"]
 
 INDIA_TARGET_LOCATION_TERMS = (
     "delhi", "ncr", "gurgaon", "gurugram", "noida", "greater noida",
@@ -36,7 +36,7 @@ INDIA_TARGET_LOCATION_TERMS = (
 def is_target_market_job(job, country=None):
     location = normalize_text(job.get("location")).lower()
     market = country or detect_country(location, job.get("title", ""), job.get("description", ""))
-    if market in GULF_COUNTRIES:
+    if market in GULF_COUNTRIES or market == "Canada":
         return True
     if market != "India":
         return False
@@ -56,6 +56,10 @@ SERPAPI_QUERIES = [
     "Q-commerce OR quick commerce Operations Manager India",
     "Cluster Manager UAE OR Dubai OR Riyadh OR Qatar",
     "Operations Manager Gulf OR UAE OR Saudi Arabia",
+    "Operations Manager Qatar OR Kuwait OR Oman",
+    "Senior Cluster Manager Canada OR Toronto OR Vancouver",
+    "City Operations Manager Canada OR Toronto OR Calgary",
+    "Program Manager Operations Supply Chain Canada OR UAE OR Saudi Arabia",
 ]
 
 
