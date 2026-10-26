@@ -1,3 +1,13 @@
+# Current production service uses native Python (no Chromium).
+# To enable the Playwright browser worker:
+#   1. In Render: New + → Web Service → Docker
+#   2. Connect this repo; Render will use the Dockerfile
+#   3. Copy all existing env vars from the Python service
+#   4. Set BROWSER_WORKER_ENABLED=true and keep BROWSER_ALLOW_SUBMIT=false
+#   5. Verify /health/browser shows chromium_launchable=true
+#   6. Only then consider a controlled dry-run / single test apply
+# Do NOT delete the existing Python service until the Docker service is healthy.
+
 services:
   - type: web
     name: autonomous-job-hunter
@@ -15,6 +25,10 @@ services:
         value: "15"
       - key: DATABASE_PATH
         value: /var/data/job_hunter.db
+      - key: BROWSER_WORKER_ENABLED
+        value: "false"
+      - key: BROWSER_ALLOW_SUBMIT
+        value: "false"
     disk:
       name: job-hunter-data
       mountPath: /var/data
