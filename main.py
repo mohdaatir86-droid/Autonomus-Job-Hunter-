@@ -2,6 +2,7 @@ import logging
 import os
 import hmac
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,6 @@ from typing import Any
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-from urllib.parse import urlparse
 
 from job_hunter import get_settings, save_settings, init_db
 from job_sources import hunt_jobs, get_stats, list_jobs, set_job_status
