@@ -150,6 +150,20 @@ app.add_middleware(
 @app.middleware("http")
 async def protect_private_candidate_data(request, call_next):
     path = request.url.path
+    if path == "/api/integrations/n8n/hunt" and request.method != "OPTIONS":
+        expected = os.getenv("N8N_AUTOMATION_TOKEN", "").strip()
+        if len(expected) < 32:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "n8n discovery integration is not configured with a strong bearer token."},
+            )
+        supplied = request.headers.get("authorization", "")
+        token = supplied[7:] if supplied.lower().startswith("bearer ") else ""
+        if not token or not hmac.compare_digest(token, expected):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized."},
+            )
     protected = (
         path == "/api/profile"
         or path.startswith("/api/profile/")
@@ -259,6 +273,7 @@ def jobs(
 
 
 @app.post("/api/hunt")
+@app.post("/api/integrations/n8n/hunt")
 async def hunt():
     result = await hunt_jobs()
     if "whatsapp_notify" not in result:
