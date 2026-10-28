@@ -38,6 +38,13 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("job-hunter")
 
 
+def internal_hunt_scheduler_enabled() -> bool:
+    configured = os.getenv("ENABLE_INTERNAL_HUNT_SCHEDULER")
+    if configured is None:
+        configured = os.getenv("ENABLE_SCHEDULER", "true")
+    return configured.strip().lower() == "true"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -70,16 +77,19 @@ async def lifespan(app: FastAPI):
                     log.exception("Scheduled hunt failed")
                     raise
 
-            scheduler.add_job(
-                scheduled_hunt,
-                "interval",
-                minutes=minutes,
-                id="job-hunt",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-                next_run_time=datetime.now(timezone.utc),
-            )
+            if internal_hunt_scheduler_enabled():
+                scheduler.add_job(
+                    scheduled_hunt,
+                    "interval",
+                    minutes=minutes,
+                    id="job-hunt",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                    next_run_time=datetime.now(timezone.utc),
+                )
+            else:
+                log.info("Internal discovery schedule disabled; external orchestration owns hunt cadence")
 
             async def scheduled_application_preparation():
                 try:
