@@ -75,7 +75,7 @@ Private profile endpoints require:
 PORTAL_ACCESS_TOKEN=your-long-random-secret
 ```
 
-The n8n discovery endpoint uses a separate `N8N_AUTOMATION_TOKEN` of at least 32 characters. Configure it in Render and as an n8n HTTP templated custom-auth credential that sends `Authorization: Bearer <token>`. Do not reuse the portal token. The endpoint runs the same discovery, normalization, deduplication and scoring pipeline as the portal. Keep the n8n workflow inactive until both credentials are configured; the existing backend scheduler is already enabled by default.
+The n8n discovery endpoint uses a separate `N8N_AUTOMATION_TOKEN` of at least 32 characters. Configure it in Render and as an n8n HTTP templated custom-auth credential that sends `Authorization: Bearer <token>`. Do not reuse the portal token. The endpoint runs the same discovery, normalization, deduplication and scoring pipeline as the portal. Keep the n8n workflow inactive until both credentials are configured. When handing discovery cadence to n8n, set `ENABLE_INTERNAL_HUNT_SCHEDULER=false` on the Render services; the application-draft preparation schedule remains enabled.
 
 ## Render deployment
 
