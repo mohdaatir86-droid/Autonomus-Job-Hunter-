@@ -27,7 +27,7 @@ These defaults are editable through `POST /api/settings` and the dashboard profi
 - Runs discovery every 15 minutes by default when the internal scheduler is enabled. Production hands discovery to n8n every 6 hours; draft preparation runs every 30 minutes only when the private profile is complete and the user turns the policy on.
 - **Application preparation**: after the private profile has a name, email and PDF resume, creates role-specific drafts for review. **Submission stays disabled.**
 - Optional form help is limited to HTTPS Greenhouse and Lever pages, fills supported visible fields, and always leaves review and submission to the user.
-- The dashboard's private setup card lets you connect with the portal access key, save your profile and upload a PDF resume. Personal details and resume text stay in the private database, never in this repository.
+- The dashboard's private setup card lets you connect with the portal access key, save your profile and upload a PDF resume. Personal details and resume text are sent to the application backend; they are never committed to this repository or sent to n8n.
 
 ## Run locally
 
