@@ -287,7 +287,7 @@ def jobs(
     opportunity: str | None = None,
     min_score: int = Query(default=0, ge=0, le=100),
     status: str | None = None,
-    posted_within_days: int | None = Query(default=None, ge=1, le=365),
+    posted_within_days: int = Query(default=1, ge=1, le=1),
     q: str | None = Query(default=None, max_length=120),
     source: str | None = Query(default=None, max_length=80),
     limit: int = Query(default=100, ge=1, le=500),

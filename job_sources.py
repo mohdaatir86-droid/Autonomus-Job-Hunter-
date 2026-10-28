@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote_plus, urlsplit, urlunsplit, parse_qsl, urlencode
 
@@ -68,13 +68,27 @@ def _parse_iso(value):
             return datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat()
         except (ValueError, OverflowError, OSError):
             return None
+
+    text = str(value).strip()
+    relative = re.fullmatch(
+        r"(?:posted\\s+)?(?P<count>\\d+(?:\\.\\d+)?|a|an)\\s*(?P<unit>minutes?|mins?|m|hours?|hrs?|h)\\s+ago",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if relative:
+        count = 1.0 if relative.group("count").lower() in {"a", "an"} else float(relative.group("count"))
+        unit = relative.group("unit").lower()
+        delta = timedelta(minutes=count) if unit.startswith("m") else timedelta(hours=count)
+        return (datetime.now(timezone.utc) - delta).isoformat()
+
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc).isoformat()
     except (TypeError, ValueError, OverflowError):
-        return str(value)[:80]
+        # Do not treat unknown or human-readable dates as verified posting timestamps.
+        return None
 
 
 def _job_url(job):
@@ -660,8 +674,9 @@ def list_jobs(
         clauses.append("lower(source) LIKE ?")
         params.append("%" + source.strip().lower() + "%")
     if posted_within_days:
-        clauses.append("date(COALESCE(posted_at, first_seen_at)) >= date('now', ?)")
-        params.append("-" + str(int(posted_within_days)) + " days")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(posted_within_days))).isoformat()
+        clauses.append("posted_at IS NOT NULL AND posted_at >= ?")
+        params.append(cutoff)
     if q:
         for term in q.split():
             term = term.strip()
