@@ -1,6 +1,6 @@
 # Autonomous Job Hunter
 
-A deployable MVP for discovering and scoring **operations leadership** vacancies tailored to a QSR / Q-commerce / dark-store / multi-unit operations profile (India + Gulf).
+A deployable MVP for discovering and scoring **operations leadership** vacancies tailored to a QSR / Q-commerce / dark-store / multi-unit operations profile (India, Gulf and Canada).
 
 This repository is intentionally independent of Product Hunter.
 
@@ -9,7 +9,7 @@ This repository is intentionally independent of Product Hunter.
 | Field | Value |
 |-------|--------|
 | **Roles** | Senior Cluster Manager, Cluster Manager, City / Area Operations Manager, Head of Operations, Warehouse / Fulfilment / Dark Store Manager, Supply Chain / Last-Mile Operations Manager, QSR Multi-Unit Manager |
-| **Countries** | India (priority), United Arab Emirates, Saudi Arabia, Qatar, Kuwait, Oman |
+| **Countries** | India, United Arab Emirates, Saudi Arabia, Qatar, Kuwait, Oman, Canada |
 | **Experience** | 8+ years multi-unit operations, dark stores, Q-commerce, QSR expansion |
 | **Key strengths scored** | Store launches, SLA, shrinkage control, large team leadership (450+), 3PL, SOPs, inventory |
 
@@ -26,7 +26,7 @@ These defaults are editable through `POST /api/settings` and the dashboard profi
 - Provides a responsive dashboard, JSON API, keyword search, country/source coverage, and interactive API documentation at `/docs`.
 - Runs scheduled discovery every 15 minutes by default.
 - **Application preparation**: generates role-specific cover letter + keyword checklist + resume guidance from the candidate profile. **Submission is disabled.**
-- Candidate profile is pre-seeded with the primary candidate details (editable, protected by `PORTAL_ACCESS_TOKEN`).
+- Candidate profile starts blank; add your details privately through the authenticated profile portal. Do not store personal details or credentials in public source code.
 
 ## Run locally
 
@@ -76,11 +76,13 @@ PORTAL_ACCESS_TOKEN=your-long-random-secret
 
 ## Render deployment
 
-1. In Render, select **New + → Blueprint** and connect this repository.
-2. Render reads `render.yaml`, installs dependencies, and starts FastAPI.
-3. Keep the persistent disk enabled. SQLite data may be lost across restarts if stored on an ephemeral filesystem.
-4. Set `PORTAL_ACCESS_TOKEN` in the Render environment.
-5. After deployment, check `/health` and `/docs`, then run `POST /api/hunt` and review `/api/stats`.
+The active production service is `autonomous-job-hunter-docker` on Render, using the Dockerfile and PostgreSQL when `DATABASE_URL` is configured. Do not create a second service from the legacy `render.yaml` without reviewing its settings first.
+
+1. Open the existing service in Render and manage configuration under **Environment**.
+2. Set a strong, unique `PORTAL_ACCESS_TOKEN` directly in Render; never commit it or paste it into chat.
+3. Configure provider keys (for example `SERPAPI_API_KEY`) only in Render. If a key returns HTTP 401, replace it with a newly issued valid key from the provider.
+4. Complete Gmail OAuth with the callback URL `https://autonomous-job-hunter-docker.onrender.com/api/gmail/callback` after setting the Google OAuth client ID and secret.
+5. After deployment, check `/health`, `/health/db`, `/health/browser`, `/api/sources`, `/api/stats`, and `/api/gmail/status`.
 
 If your Render plan does not support persistent disks, use managed PostgreSQL before relying on long-term tracking.
 
@@ -104,8 +106,8 @@ If your Render plan does not support persistent disks, use managed PostgreSQL be
 
 ## Changelog (recent)
 
-- Pre-seeded candidate profile for primary user (editable).
+- Candidate profile defaults blank to avoid publishing personal information in this public repository.
 - Scoring tuned for QSR multi-unit, dark-store, cluster and expansion roles.
-- Canada removed from default target countries (India + Gulf focus).
+- Target markets include India, UAE, Saudi Arabia, Qatar, Kuwait, Oman and Canada.
 - Richer cover-letter generation that references real achievements when relevant.
 - Default search window widened to 3 days; India salary floor set to ₹20 LPA.
