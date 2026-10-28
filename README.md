@@ -24,9 +24,10 @@ These defaults are editable through `POST /api/settings` and the dashboard profi
 - Filters and ranks by target country and match score.
 - Stores job records, first/last seen timestamps, run history, and manually maintained application status in SQLite when the configured database path is persistent.
 - Provides a responsive dashboard, JSON API, keyword search, country/source coverage, and interactive API documentation at `/docs`.
-- Runs scheduled discovery every 15 minutes by default.
-- **Application preparation**: generates role-specific cover letter + keyword checklist + resume guidance from the candidate profile. **Submission is disabled.**
-- Candidate profile starts blank; add your details privately through the authenticated profile portal. Do not store personal details or credentials in public source code.
+- Runs discovery every 15 minutes by default when the internal scheduler is enabled. Production hands discovery to n8n every 6 hours; draft preparation runs every 30 minutes only when the private profile is complete and the user turns the policy on.
+- **Application preparation**: after the private profile has a name, email and PDF resume, creates role-specific drafts for review. **Submission stays disabled.**
+- Optional form help is limited to HTTPS Greenhouse and Lever pages, fills supported visible fields, and always leaves review and submission to the user.
+- The dashboard's private setup card lets you connect with the portal access key, save your profile and upload a PDF resume. Personal details and resume text are sent to the application backend; they are never committed to this repository or sent to n8n.
 
 ## Run locally
 
@@ -54,7 +55,10 @@ Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 - `GET /api/settings` and `POST /api/settings` — supported preferences
 - `POST /api/jobs/{id}/status` — set `saved`, `applied_manually`, `interview`, `rejected`, `offer`, or `not_relevant`
 - `GET/POST /api/profile` — candidate profile (requires `PORTAL_ACCESS_TOKEN`)
-- `POST /api/profile/resume` — upload PDF resume
+- `POST /api/profile/resume` — upload a text-based PDF resume (max 8 MB)
+- `POST /api/auto-fill` — suggest values only on HTTPS Greenhouse/Lever forms (requires the private profile)
+- `POST /api/automation/prepare` and `POST /api/auto-apply/queue` — prepare drafts for review; require a complete private profile
+- `GET/POST /api/automation/settings` — save the match threshold and draft limit
 - `POST /api/applications/draft/{job_id}` — prepare cover letter + guidance for a job
 - `GET /api/applications` — list prepared drafts
 
@@ -75,7 +79,7 @@ Private profile endpoints require:
 PORTAL_ACCESS_TOKEN=your-long-random-secret
 ```
 
-The n8n discovery endpoint uses a separate `N8N_AUTOMATION_TOKEN` of at least 32 characters. Configure it in Render and as an n8n HTTP templated custom-auth credential that sends `Authorization: Bearer <token>`. Do not reuse the portal token. The endpoint runs the same discovery, normalization, deduplication and scoring pipeline as the portal. Keep the n8n workflow inactive until both credentials are configured. When handing discovery cadence to n8n, set `ENABLE_INTERNAL_HUNT_SCHEDULER=false` on the Render services; the application-draft preparation schedule remains enabled.
+The n8n discovery endpoint uses a separate `N8N_AUTOMATION_TOKEN` of at least 32 characters. Store it in Render and in the n8n HTTP templated custom-auth credential that sends `Authorization: Bearer <token>`; never reuse the portal token. The endpoint runs discovery, normalization, deduplication and scoring. In production, n8n owns the six-hour discovery schedule; set `ENABLE_INTERNAL_HUNT_SCHEDULER=false` on the web service to avoid duplicate hunts. The backend's separate 30-minute draft schedule stays idle until the user enables it and the profile has a name, email and PDF resume.
 
 ## Render deployment
 
@@ -92,7 +96,7 @@ If your Render plan does not support persistent disks, use managed PostgreSQL be
 ## Important limits and safety
 
 - **Application submission is disabled.** The service finds, scores and tracks vacancies and prepares drafts; it does not log into job sites or submit applications.
-- No CAPTCHA/OTP bypass, fabricated answers, or automatic acceptance of legal declarations is implemented.
+- Greenhouse/Lever form help only fills supported visible fields; LinkedIn, Naukri and Shine are discovery-only. No CAPTCHA/OTP bypass, fabricated answers, or automatic acceptance of legal declarations is implemented.
 - A future application workflow must use official APIs or explicitly permitted methods and pause for human input on assessments, consent, work authorization, salary commitments, or legal questions.
 - Public job APIs do not cover every employer, country, or job board. Results depend on provider availability and data coverage.
 - The current match score is a keyword heuristic, not a prediction of hiring success.

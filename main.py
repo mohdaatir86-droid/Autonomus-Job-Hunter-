@@ -2,6 +2,7 @@ import logging
 import os
 import hmac
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,27 @@ def internal_hunt_scheduler_enabled() -> bool:
     if configured is None:
         configured = os.getenv("ENABLE_SCHEDULER", "true")
     return configured.strip().lower() == "true"
+
+
+def application_profile_readiness() -> tuple[bool, list[str]]:
+    profile = get_profile()
+    missing = []
+    if not (profile.get("full_name") or "").strip():
+        missing.append("full name")
+    if not (profile.get("email") or "").strip():
+        missing.append("email")
+    if not profile.get("has_resume"):
+        missing.append("PDF resume")
+    return not missing, missing
+
+
+def require_application_profile() -> None:
+    ready, missing = application_profile_readiness()
+    if not ready:
+        raise HTTPException(
+            status_code=409,
+            detail="Complete your private profile and upload your PDF resume before preparing drafts. Missing: " + ", ".join(missing) + ".",
+        )
 
 
 @asynccontextmanager
@@ -95,6 +117,10 @@ async def lifespan(app: FastAPI):
                 try:
                     policy = get_automation_settings()
                     if not policy.get("enabled"):
+                        return
+                    profile_ready, missing_profile = application_profile_readiness()
+                    if not profile_ready:
+                        log.info("Scheduled application preparation skipped; private profile missing: %s", ", ".join(missing_profile))
                         return
                     candidates = list_jobs(
                         min_score=policy["min_score"],
@@ -362,6 +388,8 @@ def automation_settings():
 
 @app.post("/api/automation/settings")
 def update_automation_settings(payload: dict[str, Any]):
+    if payload.get("enabled") is True:
+        require_application_profile()
     try:
         return save_automation_settings(payload)
     except ValueError as exc:
@@ -370,6 +398,7 @@ def update_automation_settings(payload: dict[str, Any]):
 
 @app.post("/api/automation/prepare")
 async def automation_prepare():
+    require_application_profile()
     policy = get_automation_settings()
     if not policy.get("enabled"):
         raise HTTPException(status_code=409, detail="Automation mode is OFF. Enable it in the dashboard first.")
@@ -396,13 +425,24 @@ async def automation_prepare():
         "threshold": policy["min_score"], "candidate_count": len(candidates),
         "prepared_count": len(prepared), "prepared": prepared, "skipped": skipped, "errors": errors,
         "auto_submit_enabled": False,
-        "message": "Drafts only until Docker browser is verified and BROWSER_ALLOW_SUBMIT is explicitly enabled.",
+        "message": "Drafts only; every application submission stays a user-reviewed step.",
     }
 
 
 @app.post("/api/auto-fill")
 async def ai_auto_fill(payload: dict[str, Any]):
     page_url = str(payload.get("page_url", ""))[:1500]
+    parsed_page_url = urlparse(page_url)
+    page_host = (parsed_page_url.hostname or "").lower()
+    allowed_form_host = any(
+        page_host == domain or page_host.endswith("." + domain)
+        for domain in ("greenhouse.io", "lever.co")
+    )
+    if parsed_page_url.scheme != "https" or not allowed_form_host:
+        raise HTTPException(
+            status_code=422,
+            detail="Form help supports HTTPS Greenhouse and Lever forms only. LinkedIn, Naukri and Shine are discovery-only.",
+        )
     page_title = str(payload.get("page_title", ""))[:300]
     fields = payload.get("fields", [])
     if not isinstance(fields, list) or not fields or len(fields) > 80:
@@ -422,6 +462,7 @@ async def ai_auto_fill(payload: dict[str, Any]):
         })
     if not cleaned:
         raise HTTPException(status_code=422, detail="No supported form fields found")
+    require_application_profile()
     profile = get_profile_full()
     answers = await generate_form_answers(
         {"title": page_title, "url": page_url, "fields": cleaned},
@@ -465,6 +506,7 @@ async def upload_resume(file: UploadFile = File(...)):
 
 @app.post("/api/auto-apply/queue")
 async def auto_apply_queue():
+    require_application_profile()
     policy = get_automation_settings()
     candidates = list_jobs(min_score=policy["min_score"], status=None, limit=policy["max_per_run"])
     prepared, skipped, errors = [], [], []
@@ -498,12 +540,13 @@ async def auto_apply_queue():
         "errors": errors,
         "automatic_submission_enabled": False,
         "automation_policy_enabled": policy["enabled"],
-        "message": "Drafts only. Use POST /api/automation/run-browser for Greenhouse/Lever after Docker Chromium is healthy.",
+        "message": "Drafts only. Greenhouse/Lever form help requires your review; no application is submitted automatically.",
     }
 
 
 @app.post("/api/applications/draft/{job_id}")
 async def draft_application(job_id: int):
+    require_application_profile()
     draft = await create_application_draft(job_id)
     if not draft:
         raise HTTPException(status_code=404, detail="job not found")
