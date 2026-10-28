@@ -715,33 +715,36 @@ def get_stats():
     init_db()
     allowed = tuple(LISTABLE_COUNTRIES)
     placeholders = ",".join("?" for _ in allowed)
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    recent_where = "posted_at IS NOT NULL AND posted_at >= ? AND country IN (" + placeholders + ")"
+    recent_params = (cutoff, *allowed)
     with connect() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE country IN (" + placeholders + ")", allowed
+            "SELECT COUNT(*) FROM jobs WHERE " + recent_where, recent_params
         ).fetchone()[0]
         new_count = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE status='new' AND country IN (" + placeholders + ")", allowed
+            "SELECT COUNT(*) FROM jobs WHERE status='new' AND " + recent_where, recent_params
         ).fetchone()[0]
         high = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE match_score >= 65 AND country IN (" + placeholders + ")", allowed
+            "SELECT COUNT(*) FROM jobs WHERE match_score >= 65 AND " + recent_where, recent_params
         ).fetchone()[0]
         last = conn.execute("SELECT * FROM hunt_runs ORDER BY id DESC LIMIT 1").fetchone()
         by_country = [
             dict(row)
             for row in conn.execute(
-                "SELECT country, COUNT(*) AS count FROM jobs WHERE country IN ("
-                + placeholders
-                + ") GROUP BY country ORDER BY count DESC",
-                allowed,
+                "SELECT country, COUNT(*) AS count FROM jobs WHERE "
+                + recent_where
+                + " GROUP BY country ORDER BY count DESC",
+                recent_params,
             ).fetchall()
         ]
         by_source = [
             dict(row)
             for row in conn.execute(
-                "SELECT source, COUNT(*) AS count FROM jobs WHERE country IN ("
-                + placeholders
-                + ") GROUP BY source ORDER BY count DESC",
-                allowed,
+                "SELECT source, COUNT(*) AS count FROM jobs WHERE "
+                + recent_where
+                + " GROUP BY source ORDER BY count DESC",
+                recent_params,
             ).fetchall()
         ]
     return {
