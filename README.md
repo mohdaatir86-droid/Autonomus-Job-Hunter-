@@ -48,7 +48,8 @@ Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 - `GET /health` — service health
 - `GET /api/stats` — totals, country/source breakdown, latest run
 - `GET /api/jobs?min_score=35&limit=100` — scored jobs
-- `POST /api/hunt` — run discovery immediately
+- `POST /api/hunt` — run discovery immediately from the portal
+- `POST /api/integrations/n8n/hunt` — authenticated discovery trigger for n8n
 - `GET /api/sources` — source configuration and limitations
 - `GET /api/settings` and `POST /api/settings` — supported preferences
 - `POST /api/jobs/{id}/status` — set `saved`, `applied_manually`, `interview`, `rejected`, `offer`, or `not_relevant`
@@ -73,6 +74,8 @@ Private profile endpoints require:
 ```bash
 PORTAL_ACCESS_TOKEN=your-long-random-secret
 ```
+
+The n8n discovery endpoint uses a separate `N8N_AUTOMATION_TOKEN` of at least 32 characters. Configure it in Render and as an n8n HTTP templated custom-auth credential that sends `Authorization: Bearer <token>`. Do not reuse the portal token. The endpoint runs the same discovery, normalization, deduplication and scoring pipeline as the portal. Keep the n8n workflow inactive until both credentials are configured; the existing backend scheduler is already enabled by default.
 
 ## Render deployment
 
