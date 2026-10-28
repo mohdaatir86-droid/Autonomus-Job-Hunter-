@@ -170,54 +170,33 @@ def _keywords(description, title, skills):
 def _build_cover_letter(job, profile, keywords):
     title = job["title"] or "the role"
     company = job["company"] or "your organization"
-    name = profile.get("full_name") or "Syed Aatir Hussain"
+    name = (profile.get("full_name") or "").strip() or "Your Name"
     summary = (profile.get("experience_summary") or "").strip()
     if not summary:
-        summary = "I bring 8+ years of progressive experience in multi-unit QSR and Q-commerce operations"
-    highlights = []
-    text = (title + " " + (job.get("description") or "")).lower()
-    if any(k in text for k in ["cluster", "multi", "dark store", "store", "qsr", "expansion", "launch"]):
-        highlights.append(
-            "At Swish I am leading rapid QSR expansion — 12 stores launched in one month with 10+ more in the active pipeline, while building standardized SOPs and high-performing teams across the cluster."
-        )
-    if any(k in text for k in ["dark store", "q-commerce", "quick commerce", "fulfilment", "fulfillment", "sla", "last mile"]):
-        highlights.append(
-            "As Senior Cluster Manager at ZeptoNow I directed 18 dark stores processing ~30,000 orders daily with 450+ associates, sustaining 90% SLA and reducing inventory shrinkage by 29%."
-        )
-    if any(k in text for k in ["warehouse", "logistics", "supply chain", "3pl", "inventory"]):
-        highlights.append(
-            "Earlier roles at Supr Daily, Ninjacart and Foodpanda gave me hands-on warehouse, logistics coordination and city-level delivery operations experience."
-        )
-    if not highlights:
-        highlights.append(
-            "My background covers end-to-end operations leadership from greenfield launch through stabilization, with measurable improvements in SLA, shrinkage, fill rate and team capability."
-        )
+        summary = "I am interested in this opportunity and would welcome the chance to discuss how my verified experience aligns with the role."
     keyword_line = (
-        ("I would particularly highlight experience aligned with: " + ", ".join(keywords[:6]) + ".\n\n") if keywords else ""
+        ("Relevant terms from the posting include: " + ", ".join(keywords[:6]) + ".\n\n")
+        if keywords else ""
     )
-    cover = (
+    return (
         f"Dear Hiring Team,\n\nI am writing to express my interest in the {title} role at {company}.\n\n"
-        f"{summary.rstrip('.')}.\n\n{highlights[0]}\n\n"
+        f"{summary.rstrip('.')}." + "\n\n" + keyword_line
+        + "I would welcome the opportunity to discuss my relevant experience and how I could contribute to your team.\n\n"
+        + "Regards,\n" + name
     )
-    if len(highlights) > 1:
-        cover += highlights[1] + "\n\n"
-    cover += keyword_line
-    cover += f"I would welcome the opportunity to discuss how this experience can support your operational goals.\n\nRegards,\n{name}"
-    return cover
 
 
 def _default_guidance(title, keywords, has_resume):
     guidance = [
-        "Keep every claim consistent with your existing resume; do not invent metrics or responsibilities.",
-        f"Prioritize the most relevant experience for: {title}.",
-        "Lead with Swish (current QSR expansion) and ZeptoNow (18 dark stores, 30k orders/day, 450+ people) when the role involves multi-unit, dark store, QSR or cluster operations.",
-        "Use these posting terms only where your actual experience supports them: "
-        + (", ".join(keywords) if keywords else "Review the full job description.")
+        "Use only experience, responsibilities, dates and metrics verified in your own resume.",
+        f"Prioritize the most relevant evidence for: {title}.",
+        "Do not include company names, achievements, metrics or certifications unless they are confirmed in your private profile or uploaded resume.",
+        "Review these job-posting terms and include only those that accurately describe your experience: "
+        + (", ".join(keywords) if keywords else "Review the original job description.")
         + ".",
-        "Quantified outcomes: 12 stores launched in 1 month, 90% SLA, 29% shrinkage reduction, 95% fill rate, 96% audit compliance — use only if relevant.",
     ]
     if not has_resume:
-        guidance.insert(0, "Upload your PDF resume in Profile so AI drafts can match your exact wording.")
+        guidance.insert(0, "Upload your PDF resume in the private Profile section before relying on application drafts.")
     return guidance
 
 
