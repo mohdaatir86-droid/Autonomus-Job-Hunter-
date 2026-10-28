@@ -9,25 +9,16 @@ from pypdf import PdfReader
 from database import connect as db_connect, postgres_enabled
 from job_hunter import DB_PATH
 
+# Public repository defaults must never contain real candidate contact details or personal claims.
+# Candidate information is entered privately through the authenticated profile portal.
 DEFAULT_PROFILE = {
-    "full_name": "Syed Aatir Hussain",
-    "email": "mohdaatir86@gmail.com",
-    "phone": "+91 8979743453",
-    "linkedin_url": "https://linkedin.com/in/syed-aatir-hussain-b04520194",
-    "headline": "Cluster Manager | QSR Expansion & Q-Commerce Operations | 8+ Years",
-    "experience_summary": (
-        "Operations-driven leader with 8+ years in multi-unit QSR operations, dark store management, "
-        "Q-commerce fulfillment and supply chain optimization. Currently Cluster Manager at Swish leading "
-        "rapid QSR expansion (12 stores launched in one month, 10+ in pipeline). Previously Senior Cluster "
-        "Manager at ZeptoNow directing 18 dark stores, ~30,000 orders/day and 450+ frontline associates. "
-        "Proven in greenfield launches, SLA excellence (90%+), shrinkage reduction, and building high-performance teams."
-    ),
-    "skills": [
-        "Cluster Operations", "QSR Operations", "Dark Store Management", "Q-Commerce Fulfillment",
-        "Multi-Unit Management", "Store Launch & Expansion", "SLA & KPI Management",
-        "Inventory & Shrinkage Control", "Vendor Management", "3PL Coordination",
-        "Last-Mile Logistics", "SOP Development", "Team Leadership (450+)", "Cost Optimization",
-    ],
+    "full_name": "",
+    "email": "",
+    "phone": "",
+    "linkedin_url": "",
+    "headline": "",
+    "experience_summary": "",
+    "skills": [],
 }
 
 
