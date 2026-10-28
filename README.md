@@ -56,9 +56,9 @@ Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 - `POST /api/jobs/{id}/status` — set `saved`, `applied_manually`, `interview`, `rejected`, `offer`, or `not_relevant`
 - `GET/POST /api/profile` — candidate profile (requires `PORTAL_ACCESS_TOKEN`)
 - `POST /api/profile/resume` — upload a text-based PDF resume (max 8 MB)
+- `POST /api/auto-fill` — suggest values only on HTTPS Greenhouse/Lever forms (requires the private profile)
 - `POST /api/automation/prepare` and `POST /api/auto-apply/queue` — prepare drafts for review; require a complete private profile
 - `GET/POST /api/automation/settings` — save the match threshold and draft limit
-- `POST /api/profile/resume` — upload PDF resume
 - `POST /api/applications/draft/{job_id}` — prepare cover letter + guidance for a job
 - `GET /api/applications` — list prepared drafts
 
