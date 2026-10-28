@@ -43,3 +43,19 @@ def test_n8n_discovery_route_requires_dedicated_bearer_token(monkeypatch):
         assert calls == [True, True]
     finally:
         client.close()
+
+
+def test_internal_hunt_scheduler_can_be_delegated_to_n8n(monkeypatch):
+    monkeypatch.delenv("ENABLE_INTERNAL_HUNT_SCHEDULER", raising=False)
+    monkeypatch.setenv("ENABLE_SCHEDULER", "true")
+    assert main.internal_hunt_scheduler_enabled() is True
+
+    monkeypatch.setenv("ENABLE_INTERNAL_HUNT_SCHEDULER", "false")
+    assert main.internal_hunt_scheduler_enabled() is False
+
+    monkeypatch.setenv("ENABLE_INTERNAL_HUNT_SCHEDULER", "true")
+    assert main.internal_hunt_scheduler_enabled() is True
+
+    monkeypatch.delenv("ENABLE_INTERNAL_HUNT_SCHEDULER", raising=False)
+    monkeypatch.setenv("ENABLE_SCHEDULER", "false")
+    assert main.internal_hunt_scheduler_enabled() is False
