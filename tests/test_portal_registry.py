@@ -4,10 +4,24 @@ from portal_registry import get_portal_registry, portal_support_level, PORTAL_RE
 def test_registry_has_priority_portals():
     reg = get_portal_registry()
     portals = reg["portals"]
-    for key in ("greenhouse", "lever", "naukri", "linkedin", "indeed", "bayt", "gulftalent"):
+    for key in (
+        "greenhouse", "lever", "naukri", "linkedin", "indeed", "bayt", "gulftalent",
+        "naukri_gulf", "shine", "foundit", "hirist", "iimjobs", "timesjobs",
+        "catererglobal", "gulfjobs",
+    ):
         assert key in portals
         assert "discovery" in portals[key]
         assert "submission" in portals[key]
+
+
+def test_india_and_gulf_additions_are_search_only(monkeypatch):
+    monkeypatch.setenv("SERPAPI_API_KEY", "test-search-key")
+    portals = get_portal_registry()["portals"]
+    for key in ("shine", "foundit", "hirist", "iimjobs", "timesjobs", "naukri_gulf", "catererglobal", "gulfjobs"):
+        assert portals[key]["discovery"] is True
+        assert portals[key]["application_form"] is False
+        assert portals[key]["submission"] is False
+        assert portals[key]["market_focus"] in {"India", "Gulf"}
 
 
 def test_no_portal_claims_full_submission_by_default():

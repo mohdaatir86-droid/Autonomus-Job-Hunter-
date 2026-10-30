@@ -52,9 +52,13 @@ Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 - `POST /api/hunt` — run discovery immediately from the portal
 - `POST /api/integrations/n8n/hunt` — authenticated discovery trigger for n8n
 - `GET /api/sources` — source configuration and limitations
+- `GET /api/auth/google/config` — whether Google sign-in is configured
+- `POST /api/auth/google/session` — Google Identity Services login callback
+- `GET /api/auth/session` — current Google portal session
+- `POST /api/auth/logout` — end the portal session
 - `GET /api/settings` and `POST /api/settings` — supported preferences
 - `POST /api/jobs/{id}/status` — set `saved`, `applied_manually`, `interview`, `rejected`, `offer`, or `not_relevant`
-- `GET/POST /api/profile` — candidate profile (requires `PORTAL_ACCESS_TOKEN`)
+- `GET/POST /api/profile` — candidate profile (requires the private access key or a verified Google session)
 - `POST /api/profile/resume` — upload a text-based PDF resume (max 8 MB)
 - `POST /api/auto-fill` — suggest values only on HTTPS Greenhouse/Lever forms (requires the private profile)
 - `POST /api/automation/prepare` and `POST /api/auto-apply/queue` — prepare drafts for review; require a complete private profile
@@ -73,11 +77,14 @@ Optional company board slugs can be set as comma-separated environment variables
 - `GREENHOUSE_BOARDS=company_slug,another_slug`
 - `LEVER_SITES=company_slug,another_slug`
 
-Private profile endpoints require:
+Private profile endpoints accept the private access key or a Google sign-in session. Google sign-in requires:
 
 ```bash
 PORTAL_ACCESS_TOKEN=your-long-random-secret
+GOOGLE_CLIENT_ID=your-google-web-client-id.apps.googleusercontent.com
 ```
+
+In Google Cloud Console, add `https://autonomous-job-hunter-docker.onrender.com` as an Authorized JavaScript origin and `https://autonomous-job-hunter-docker.onrender.com/api/auth/google/session` as an Authorized redirect URI. The Google account must match the email already saved in the candidate profile. The same `GOOGLE_CLIENT_ID` can also be used for Gmail alerts; only Gmail access requires the client secret.
 
 The n8n discovery endpoint uses a separate `N8N_AUTOMATION_TOKEN` of at least 32 characters. Store it in Render and in the n8n HTTP templated custom-auth credential that sends `Authorization: Bearer <token>`; never reuse the portal token. The endpoint runs discovery, normalization, deduplication and scoring. In production, n8n owns the six-hour discovery schedule; set `ENABLE_INTERNAL_HUNT_SCHEDULER=false` on the web service to avoid duplicate hunts. The backend's separate 30-minute draft schedule stays idle until the user enables it and the profile has a name, email and PDF resume.
 
@@ -97,6 +104,7 @@ If your Render plan does not support persistent disks, use managed PostgreSQL be
 
 - **Application submission is disabled.** The service finds, scores and tracks vacancies and prepares drafts; it does not log into job sites or submit applications.
 - Greenhouse/Lever form help only fills supported visible fields; LinkedIn, Naukri and Shine are discovery-only. No CAPTCHA/OTP bypass, fabricated answers, or automatic acceptance of legal declarations is implemented.
+- Naukri, Shine, Foundit, Hirist, IIMJobs, TimesJobs, Naukri Gulf, Bayt, GulfTalent, CatererGlobal and GulfJobs are discovery-only through search results and available job-alert emails. These portals do not support automated application in this project.
 - A future application workflow must use official APIs or explicitly permitted methods and pause for human input on assessments, consent, work authorization, salary commitments, or legal questions.
 - Public job APIs do not cover every employer, country, or job board. Results depend on provider availability and data coverage.
 - The current match score is a keyword heuristic, not a prediction of hiring success.

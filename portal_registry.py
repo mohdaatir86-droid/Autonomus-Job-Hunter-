@@ -54,6 +54,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "serpapi_google_jobs": {
         "display_name": "Google Jobs (SerpApi)",
+        "market_focus": "India + Gulf",
         "discovery": True,
         "job_details": True,
         "application_form": False,
@@ -96,6 +97,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "naukri": {
         "display_name": "Naukri",
+        "market_focus": "India",
         "discovery": True,
         "job_details": False,
         "application_form": False,
@@ -110,6 +112,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "linkedin": {
         "display_name": "LinkedIn Jobs",
+        "market_focus": "India + Gulf",
         "discovery": True,
         "job_details": False,
         "application_form": False,
@@ -124,6 +127,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "indeed": {
         "display_name": "Indeed",
+        "market_focus": "India + Gulf",
         "discovery": True,
         "job_details": False,
         "application_form": False,
@@ -138,6 +142,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "foundit": {
         "display_name": "Foundit (Monster)",
+        "market_focus": "India",
         "discovery": True,
         "job_details": False,
         "application_form": False,
@@ -146,12 +151,13 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "confirmation_verification": False,
         "auth_required": True,
         "auth_status": "not_configured",
-        "integration_health": "unsupported_application",
+        "integration_health": "via_google_jobs",
         "last_successful_test": None,
-        "notes": "Discovery via Gmail alerts / SerpApi only.",
+        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
     },
     "gulftalent": {
         "display_name": "GulfTalent",
+        "market_focus": "Gulf",
         "discovery": True,
         "job_details": False,
         "application_form": False,
@@ -166,6 +172,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "bayt": {
         "display_name": "Bayt",
+        "market_focus": "Gulf",
         "discovery": True,
         "job_details": False,
         "application_form": False,
@@ -178,6 +185,111 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "last_successful_test": None,
         "notes": "Discovery only. Gulf market focus.",
     },
+    "naukri_gulf": {
+        "display_name": "Naukri Gulf",
+        "market_focus": "Gulf",
+        "discovery": True,
+        "job_details": False,
+        "application_form": False,
+        "resume_upload": False,
+        "submission": False,
+        "confirmation_verification": False,
+        "auth_required": True,
+        "auth_status": "not_configured",
+        "integration_health": "via_google_jobs",
+        "last_successful_test": None,
+        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
+    },
+    "shine": {
+        "display_name": "Shine",
+        "market_focus": "India",
+        "discovery": True,
+        "job_details": False,
+        "application_form": False,
+        "resume_upload": False,
+        "submission": False,
+        "confirmation_verification": False,
+        "auth_required": True,
+        "auth_status": "not_configured",
+        "integration_health": "via_google_jobs",
+        "last_successful_test": None,
+        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
+    },
+    "hirist": {
+        "display_name": "Hirist",
+        "market_focus": "India",
+        "discovery": True,
+        "job_details": False,
+        "application_form": False,
+        "resume_upload": False,
+        "submission": False,
+        "confirmation_verification": False,
+        "auth_required": True,
+        "auth_status": "not_configured",
+        "integration_health": "via_google_jobs",
+        "last_successful_test": None,
+        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
+    },
+    "iimjobs": {
+        "display_name": "IIMJobs",
+        "market_focus": "India",
+        "discovery": True,
+        "job_details": False,
+        "application_form": False,
+        "resume_upload": False,
+        "submission": False,
+        "confirmation_verification": False,
+        "auth_required": True,
+        "auth_status": "not_configured",
+        "integration_health": "via_google_jobs",
+        "last_successful_test": None,
+        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
+    },
+    "timesjobs": {
+        "display_name": "TimesJobs",
+        "market_focus": "India",
+        "discovery": True,
+        "job_details": False,
+        "application_form": False,
+        "resume_upload": False,
+        "submission": False,
+        "confirmation_verification": False,
+        "auth_required": True,
+        "auth_status": "not_configured",
+        "integration_health": "via_google_jobs",
+        "last_successful_test": None,
+        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
+    },
+    "catererglobal": {
+        "display_name": "CatererGlobal",
+        "market_focus": "Gulf",
+        "discovery": True,
+        "job_details": False,
+        "application_form": False,
+        "resume_upload": False,
+        "submission": False,
+        "confirmation_verification": False,
+        "auth_required": True,
+        "auth_status": "not_configured",
+        "integration_health": "via_google_jobs",
+        "last_successful_test": None,
+        "notes": "Discovery through Google Jobs/SerpApi results. No direct portal login or application.",
+    },
+    "gulfjobs": {
+        "display_name": "GulfJobs",
+        "market_focus": "Gulf",
+        "discovery": True,
+        "job_details": False,
+        "application_form": False,
+        "resume_upload": False,
+        "submission": False,
+        "confirmation_verification": False,
+        "auth_required": True,
+        "auth_status": "not_configured",
+        "integration_health": "via_google_jobs",
+        "last_successful_test": None,
+        "notes": "Discovery through Google Jobs/SerpApi results. No direct portal login or application.",
+    },
 }
 
 
@@ -189,7 +301,15 @@ def get_portal_registry() -> dict[str, Any]:
     if not os.getenv("SERPAPI_API_KEY", "").strip():
         registry["serpapi_google_jobs"]["integration_health"] = "key_missing"
         registry["serpapi_google_jobs"]["discovery"] = False
+        for key, portal in registry.items():
+            if portal.get("integration_health") == "via_google_jobs":
+                portal["integration_health"] = "key_missing"
+                portal["discovery"] = False
     browser_ready = os.getenv("BROWSER_WORKER_ENABLED", "false").lower() == "true"
+    for key, portal in registry.items():
+        if portal.get("auth_required") and portal.get("discovery") and not portal.get("application_form"):
+            if portal.get("integration_health") != "key_missing":
+                portal["integration_health"] = "discovery_only"
     for key in ("greenhouse", "lever"):
         if browser_ready:
             registry[key]["integration_health"] = "partial_browser_ready"
