@@ -1,13 +1,18 @@
 import logging
 import os
 import hmac
+import base64
+import hashlib
+import json
+import secrets
+import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
@@ -65,6 +70,73 @@ def require_application_profile() -> None:
             status_code=409,
             detail="Complete your private profile and upload your PDF resume before preparing drafts. Missing: " + ", ".join(missing) + ".",
         )
+
+
+PORTAL_SESSION_COOKIE = "jh_portal_session"
+PORTAL_CSRF_COOKIE = "jh_portal_csrf"
+PORTAL_SESSION_SECONDS = 7 * 24 * 60 * 60
+
+
+def _portal_session_key() -> bytes | None:
+    access_token = os.getenv("PORTAL_ACCESS_TOKEN", "").strip()
+    if len(access_token) < 32:
+        return None
+    return hashlib.sha256(("job-hunter-google-session:" + access_token).encode("utf-8")).digest()
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _issue_portal_session(email: str, now: int | None = None) -> str | None:
+    key = _portal_session_key()
+    if not key:
+        return None
+    issued = int(time.time()) if now is None else int(now)
+    payload = _b64url(json.dumps({"email": email.strip().lower(), "iat": issued, "exp": issued + PORTAL_SESSION_SECONDS}, separators=(",", ":")).encode("utf-8"))
+    signature = _b64url(hmac.new(key, payload.encode("ascii"), hashlib.sha256).digest())
+    return payload + "." + signature
+
+
+def _read_portal_session(token: str | None, now: int | None = None) -> dict[str, Any] | None:
+    key = _portal_session_key()
+    if not key or not token:
+        return None
+    try:
+        payload_part, signature = token.split(".", 1)
+        expected = _b64url(hmac.new(key, payload_part.encode("ascii"), hashlib.sha256).digest())
+        if not hmac.compare_digest(signature, expected):
+            return None
+        padded = payload_part + "=" * (-len(payload_part) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+        current = int(time.time()) if now is None else int(now)
+        if not isinstance(payload, dict) or not isinstance(payload.get("email"), str):
+            return None
+        if int(payload.get("exp", 0)) <= current or int(payload.get("iat", current + 1)) > current:
+            return None
+        if int(payload.get("exp", 0)) - int(payload.get("iat", current)) > PORTAL_SESSION_SECONDS:
+            return None
+        return payload
+    except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def _portal_session_matches_profile(session: dict[str, Any] | None) -> bool:
+    if not session:
+        return False
+    profile_email = str(get_profile().get("email") or "").strip().lower()
+    session_email = str(session.get("email") or "").strip().lower()
+    return bool(profile_email and session_email and hmac.compare_digest(profile_email, session_email))
+
+
+def _verify_google_credential(credential: str) -> dict[str, Any]:
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    if not client_id:
+        raise ValueError("Google sign-in is not configured")
+    from google.auth.transport.requests import Request as GoogleRequest
+    from google.oauth2 import id_token
+
+    return id_token.verify_oauth2_token(credential, GoogleRequest(), audience=client_id)
 
 
 @asynccontextmanager
@@ -222,11 +294,20 @@ async def protect_private_candidate_data(request, call_next):
             )
         supplied = request.headers.get("authorization", "")
         token = supplied[7:] if supplied.lower().startswith("bearer ") else ""
-        if not token or not hmac.compare_digest(token, expected):
+        if token and hmac.compare_digest(token, expected):
+            return await call_next(request)
+
+        session = _read_portal_session(request.cookies.get(PORTAL_SESSION_COOKIE))
+        if not _portal_session_matches_profile(session):
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Enter the private portal access token to use profile and application drafts."},
+                content={"detail": "Sign in with the Google account saved in your profile, or enter your private access key."},
             )
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            csrf_cookie = request.cookies.get(PORTAL_CSRF_COOKIE, "")
+            csrf_header = request.headers.get("x-jh-csrf", "")
+            if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+                return JSONResponse(status_code=403, content={"detail": "The request could not be verified. Refresh and try again."})
     return await call_next(request)
 
 
@@ -274,6 +355,88 @@ def health_db():
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "service": "autonomous-job-hunter"}
+
+
+@app.get("/api/auth/google/config")
+def google_sign_in_config():
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    portal_key_ready = bool(_portal_session_key())
+    enabled = bool(client_id and portal_key_ready)
+    if not client_id:
+        reason = "Google sign-in needs GOOGLE_CLIENT_ID in Render and the portal callback added to the Google OAuth client."
+    elif not portal_key_ready:
+        reason = "The private portal access key must be configured before Google sign-in can be enabled."
+    else:
+        reason = "Sign in with the same Google email saved in your Job Hunter profile."
+    return {"enabled": enabled, "client_id": client_id if enabled else None, "reason": reason}
+
+
+@app.get("/api/auth/session")
+def google_sign_in_session(request: Request):
+    session = _read_portal_session(request.cookies.get(PORTAL_SESSION_COOKIE))
+    if not _portal_session_matches_profile(session):
+        return {"authenticated": False}
+    return {"authenticated": True, "email": str(session.get("email", ""))}
+
+
+@app.post("/api/auth/google/session")
+async def google_sign_in(request: Request):
+    """Verify Google's ID token and issue a short-lived, HttpOnly portal session."""
+    if not google_sign_in_config().get("enabled"):
+        return RedirectResponse("/?google_signin=not_configured#profilePanel", status_code=303)
+    try:
+        form = await request.form()
+        form_csrf = str(form.get("g_csrf_token") or "")
+        cookie_csrf = request.cookies.get("g_csrf_token", "")
+        if not form_csrf or not cookie_csrf or not hmac.compare_digest(form_csrf, cookie_csrf):
+            return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
+        credential = str(form.get("credential") or "")
+        if not credential or len(credential) > 16384:
+            return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
+        claims = _verify_google_credential(credential)
+        email = str(claims.get("email") or "").strip().lower()
+        if claims.get("email_verified") is not True or not claims.get("sub") or not email:
+            return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
+        profile_email = str(get_profile().get("email") or "").strip().lower()
+        if not profile_email or not hmac.compare_digest(profile_email, email):
+            return RedirectResponse("/?google_signin=email_mismatch#profilePanel", status_code=303)
+        session_cookie = _issue_portal_session(email)
+        if not session_cookie:
+            return RedirectResponse("/?google_signin=not_configured#profilePanel", status_code=303)
+        response = RedirectResponse("/?google_signin=success#profilePanel", status_code=303)
+        public_origin = os.getenv("RENDER_EXTERNAL_URL", "").lower()
+        secure_cookie = request.url.scheme.lower() == "https" or public_origin.startswith("https://")
+        csrf_cookie = secrets.token_urlsafe(32)
+        response.set_cookie(
+            PORTAL_SESSION_COOKIE,
+            session_cookie,
+            max_age=PORTAL_SESSION_SECONDS,
+            httponly=True,
+            secure=secure_cookie,
+            samesite="lax",
+            path="/",
+        )
+        response.set_cookie(
+            PORTAL_CSRF_COOKIE,
+            csrf_cookie,
+            max_age=PORTAL_SESSION_SECONDS,
+            httponly=False,
+            secure=secure_cookie,
+            samesite="lax",
+            path="/",
+        )
+        return response
+    except Exception as exc:
+        log.warning("Google sign-in failed (%s)", type(exc).__name__)
+        return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
+
+
+@app.post("/api/auth/logout")
+def google_sign_out():
+    response = JSONResponse({"signed_out": True})
+    response.delete_cookie(PORTAL_SESSION_COOKIE, path="/")
+    response.delete_cookie(PORTAL_CSRF_COOKIE, path="/")
+    return response
 
 
 @app.get("/api/stats")
@@ -614,6 +777,7 @@ async def notify_test():
 @app.get("/api/sources")
 def sources():
     from job_sources import get_source_report, BUILTIN_GREENHOUSE_BOARDS
+    from portal_registry import get_portal_registry
 
     gmail = get_gmail_status()
     report = get_source_report() or {}
@@ -674,6 +838,11 @@ def sources():
         "gmail": gmail,
         "ai": ai_status(),
         "whatsapp": notify_status(),
+        "portal_coverage": {
+            key: portal
+            for key, portal in get_portal_registry()["portals"].items()
+            if portal.get("market_focus")
+        },
         "live_applications_enabled": False,
         "admin_locked": bool(os.getenv("PORTAL_ACCESS_TOKEN", "").strip()),
     }
