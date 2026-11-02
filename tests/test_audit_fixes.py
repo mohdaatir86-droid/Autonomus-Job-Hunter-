@@ -1,5 +1,6 @@
 import asyncio
 import os
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 import job_hunter
@@ -79,6 +80,39 @@ def test_source_status_classification():
     assert job_sources.status_from_error_text("request timed out") == "unavailable"
 
 
+def test_relative_posting_times_are_parsed_for_freshness():
+    now = datetime.now(timezone.utc)
+    parsed = datetime.fromisoformat(job_sources._parse_iso("Posted 3 hours ago"))
+    assert now - timedelta(hours=4) < parsed <= now
+    old = datetime.fromisoformat(job_sources._parse_iso("2 days ago"))
+    assert old < now - timedelta(hours=24)
+
+
+def test_portal_source_attribution_uses_verified_provider_or_host():
+    assert job_sources.identify_portal_source("Naukri Gulf", []) == "naukri_gulf"
+    assert job_sources.identify_portal_source("Indeed", []) == "indeed"
+    assert job_sources.identify_portal_source("", ["https://careers.naukrigulf.com/jobs/1"]) == "naukri_gulf"
+    assert job_sources.identify_portal_source("", ["https://naukri.com.attacker.example/job/1"]) is None
+
+
+def test_every_listed_board_has_source_alias_and_domain_matching():
+    for key, _display_name, aliases, domains in job_sources.PORTAL_SOURCE_MATCHES:
+        assert job_sources.identify_portal_source(aliases[0], []) == key
+        assert job_sources.identify_portal_source("", [f"https://careers.{domains[0]}/jobs/1"]) == key
+
+
+def test_portal_discovery_counts_are_unique_by_board_and_listing():
+    counts = job_sources.portal_discovery_counts([
+        {"source": "Naukri Gulf via Google Jobs", "url": "https://www.naukrigulf.com/jobs/1?utm_source=google"},
+        {"source": "Naukri Gulf via Google Jobs", "url": "https://naukrigulf.com/jobs/1"},
+        {"source": "Foundit (email alert)", "url": "https://www.foundit.in/job/2"},
+    ])
+    assert counts["naukri_gulf"] == 1
+    assert counts["foundit"] == 1
+    assert counts["serpapi_google_jobs"] == 1
+    assert counts["naukri"] == 0
+
+
 def test_oauth_state_and_exchange_error(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
@@ -103,6 +137,14 @@ def test_gmail_alert_parse_and_seen_rows(tmp_path, monkeypatch):
     assert len(jobs) == 1
     assert jobs[0]["source"].startswith("Naukri")
     assert "unsubscribe" not in jobs[0]["url"]
+    assert jobs[0]["posted_at"] is None  # Email arrival is not a verified posting time.
+    fresh = gmail_alerts._extract_jobs_from_email(
+        "Naukri job alert",
+        "alerts@naukri.com",
+        "Posted 3 hours ago: https://www.naukri.com/job-listings-cluster-manager-dubai-456",
+        "msg-2",
+    )
+    assert fresh[0]["posted_at"] is not None
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setattr(job_hunter, "DB_PATH", str(tmp_path / "gmail.sqlite"))
     monkeypatch.setattr(gmail_alerts, "DB_PATH", str(tmp_path / "gmail.sqlite"))

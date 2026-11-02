@@ -25,6 +25,22 @@ from job_hunter import (
 
 log = logging.getLogger("job-hunter")
 
+PORTAL_SOURCE_MATCHES = (
+    ("naukri_gulf", "Naukri Gulf", ("naukri gulf", "naukrigulf"), ("naukrigulf.com",)),
+    ("naukri", "Naukri", ("naukri",), ("naukri.com",)),
+    ("linkedin", "LinkedIn Jobs", ("linkedin",), ("linkedin.com",)),
+    ("indeed", "Indeed", ("indeed",), ("indeed.com",)),
+    ("foundit", "Foundit (Monster)", ("foundit", "monster"), ("foundit.in", "monster.com", "monsterindia.com")),
+    ("gulftalent", "GulfTalent", ("gulftalent",), ("gulftalent.com",)),
+    ("bayt", "Bayt", ("bayt",), ("bayt.com",)),
+    ("shine", "Shine", ("shine",), ("shine.com",)),
+    ("hirist", "Hirist", ("hirist",), ("hirist.com",)),
+    ("iimjobs", "IIMJobs", ("iimjobs",), ("iimjobs.com",)),
+    ("timesjobs", "TimesJobs", ("timesjobs",), ("timesjobs.com",)),
+    ("catererglobal", "CatererGlobal", ("catererglobal",), ("catererglobal.com",)),
+    ("gulfjobs", "GulfJobs", ("gulfjobs",), ("gulfjobs.com",)),
+)
+
 GULF_COUNTRIES = ["United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman"]
 LISTABLE_COUNTRIES = ["India"] + GULF_COUNTRIES + ["Canada"]
 
@@ -71,14 +87,19 @@ def _parse_iso(value):
 
     text = str(value).strip()
     relative = re.fullmatch(
-        r"(?:posted\\s+)?(?P<count>\\d+(?:\\.\\d+)?|a|an)\\s*(?P<unit>minutes?|mins?|m|hours?|hrs?|h)\\s+ago",
+        r"(?:posted\s+)?(?P<count>\d+(?:\.\d+)?|a|an)\s*(?P<unit>minutes?|mins?|m|hours?|hrs?|h|days?|d)\s+ago",
         text,
         flags=re.IGNORECASE,
     )
     if relative:
         count = 1.0 if relative.group("count").lower() in {"a", "an"} else float(relative.group("count"))
         unit = relative.group("unit").lower()
-        delta = timedelta(minutes=count) if unit.startswith("m") else timedelta(hours=count)
+        if unit.startswith("m"):
+            delta = timedelta(minutes=count)
+        elif unit.startswith("d"):
+            delta = timedelta(days=count)
+        else:
+            delta = timedelta(hours=count)
         return (datetime.now(timezone.utc) - delta).isoformat()
 
     try:
@@ -96,6 +117,48 @@ def _job_url(job):
     if not url.startswith(("http://", "https://")):
         return ""
     return url
+
+
+def identify_portal_source(via="", urls=()):
+    """Return a known board key only when Google/Gmail identifies that board."""
+    via_text = normalize_text(via).lower()
+    candidates = [str(url) for url in (urls or ()) if url]
+    for key, _display_name, aliases, _domains in PORTAL_SOURCE_MATCHES:
+        if any(alias in via_text for alias in aliases):
+            return key
+    for candidate in candidates:
+        try:
+            hostname = (urlsplit(candidate).hostname or "").lower().removeprefix("www.")
+        except ValueError:
+            continue
+        for key, _display_name, _aliases, domains in PORTAL_SOURCE_MATCHES:
+            if any(hostname == domain or hostname.endswith("." + domain) for domain in domains):
+                return key
+    return None
+
+
+def portal_discovery_counts(jobs):
+    """Count unique, attributed listings from the latest aggregator/alert fetch."""
+    counts = {key: 0 for key, *_ in PORTAL_SOURCE_MATCHES}
+    counts["serpapi_google_jobs"] = 0
+    seen = set()
+    for job in jobs or []:
+        source = str(job.get("source") or "")
+        url = normalize_job_url(job.get("url") or "")
+        if "google jobs" in source.lower():
+            identity = ("serpapi_google_jobs", url or str(job.get("source_id") or job.get("title") or ""))
+            if identity not in seen:
+                seen.add(identity)
+                counts["serpapi_google_jobs"] += 1
+        key = identify_portal_source(source, [job.get("url")])
+        if not key:
+            continue
+        identity = (key, url or str(job.get("source_id") or job.get("title") or ""))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        counts[key] += 1
+    return counts
 
 
 def _extract_posted(raw):
@@ -239,8 +302,13 @@ def ensure_job_columns():
             pass
 
 
-def persist_source_report(reports):
-    payload = {"checked_at": now_iso(), "sources": reports}
+def persist_source_report(reports, portal_counts=None):
+    payload = {
+        "checked_at": now_iso(),
+        "sources": reports,
+        "portal_counts": portal_counts or {},
+        "portal_fetch_method": "Google Jobs aggregator and connected job-alert emails",
+    }
     with connect() as conn:
         conn.execute(
             "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -310,15 +378,19 @@ async def fetch_serpapi_google_jobs(client, limit):
                 params={"engine": "google_jobs", "q": q, "hl": "en", "api_key": api_key},
             )
             for raw in (data.get("jobs_results") or [])[:per_q]:
-                apply_options = raw.get("apply_options") or []
-                link = raw.get("share_link") or raw.get("link") or ""
-                if not link and apply_options:
-                    link = apply_options[0].get("link") or ""
-                for opt in apply_options:
-                    l = (opt.get("link") or "").lower()
-                    if any(x in l for x in ("naukri", "linkedin", "shine", "monster", "bayt", "gulftalent")):
-                        link = opt.get("link") or link
-                        break
+                apply_options = [opt for opt in (raw.get("apply_options") or []) if isinstance(opt, dict)]
+                option_links = [opt.get("link") or "" for opt in apply_options]
+                via = normalize_text(raw.get("via") or "")
+                portal_key = identify_portal_source(via, option_links + [raw.get("link"), raw.get("share_link")])
+                link = ""
+                if portal_key:
+                    link = next(
+                        (candidate for candidate in option_links if identify_portal_source(urls=[candidate]) == portal_key),
+                        "",
+                    )
+                link = link or raw.get("share_link") or raw.get("link") or ""
+                if not link and option_links:
+                    link = option_links[0]
                 company = raw.get("company_name") if isinstance(raw.get("company_name"), str) else ""
                 loc = raw.get("location") or ""
                 ext = raw.get("detected_extensions") or {}
@@ -340,8 +412,10 @@ async def fetch_serpapi_google_jobs(client, limit):
                 }
                 job = _clean_job(normalized, "Google Jobs (SerpApi)")
                 if job:
-                    via = normalize_text(raw.get("via") or "")
-                    if via:
+                    if portal_key:
+                        display_name = next(name for key, name, *_ in PORTAL_SOURCE_MATCHES if key == portal_key)
+                        job["source"] = f"{display_name} via Google Jobs"[:80]
+                    elif via:
                         job["source"] = f"Google Jobs / {via}"[:80]
                     out.append(job)
         except Exception as e:
@@ -494,7 +568,7 @@ async def fetch_public_sources(settings):
             log.warning("Gmail alerts failed: %s", summary)
             add_report("Gmail job alerts", [], summary)
 
-    return results, errors, reports
+    return results, errors, reports, portal_discovery_counts(results)
 
 
 def _find_existing_job(conn, job, normalized_url):
@@ -544,7 +618,7 @@ async def _hunt_jobs_locked():
     started = now_iso()
     settings = get_settings()
     ensure_job_columns()
-    fetched, errors, reports = await fetch_public_sources(settings)
+    fetched, errors, reports, portal_counts = await fetch_public_sources(settings)
     inserted = updated = closed = 0
     sources_touched = set()
     notify_jobs = []
@@ -621,7 +695,7 @@ async def _hunt_jobs_locked():
             (started, now_iso(), len(reports), len(fetched), inserted, json.dumps(errors)),
         )
     try:
-        persist_source_report(reports)
+        persist_source_report(reports, portal_counts)
     except Exception:
         log.exception("Could not persist source report")
     notify_result = {"sent": False, "skipped": True}

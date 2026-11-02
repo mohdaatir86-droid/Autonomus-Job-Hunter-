@@ -43,6 +43,9 @@ ALERT_SENDERS = [
     "iimjobs.com",
     "foundit.in",
     "timesjobs.com",
+    "naukrigulf.com",
+    "catererglobal.com",
+    "gulfjobs.com",
 ]
 
 URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
@@ -94,7 +97,7 @@ def get_gmail_status() -> dict[str, Any]:
         "Create a Google Cloud OAuth client (Web application) with redirect URI "
         + _redirect_uri()
         + ". Enable the Gmail API. Set the missing variable names in Render, then open /api/gmail/auth. "
-        "Create job alerts on Naukri, LinkedIn, Shine, Indeed, Bayt and GulfTalent to that Gmail."
+        "Create job alerts on Naukri, Naukri Gulf, LinkedIn, Indeed, Foundit, Shine, Hirist, IIMJobs, TimesJobs, GulfTalent, Bayt, CatererGlobal and GulfJobs to that Gmail."
     )
     if gmail_configured() and not missing and not connected:
         hint = "OAuth credentials are set. Open /api/gmail/auth and approve read-only Gmail access. No password is requested."
@@ -302,16 +305,20 @@ def _decode_body(payload: dict) -> str:
 def _guess_source(from_header: str, subject: str) -> str:
     blob = (from_header + " " + subject).lower()
     mapping = [
+        ("naukrigulf", "Naukri Gulf (email alert)"),
+        ("catererglobal", "CatererGlobal (email alert)"),
+        ("gulfjobs", "GulfJobs (email alert)"),
+        ("gulftalent", "GulfTalent (email alert)"),
         ("naukri", "Naukri (email alert)"),
         ("linkedin", "LinkedIn (email alert)"),
         ("shine", "Shine (email alert)"),
         ("monster", "Monster (email alert)"),
         ("bayt", "Bayt (email alert)"),
-        ("gulftalent", "GulfTalent (email alert)"),
         ("indeed", "Indeed (email alert)"),
         ("foundit", "Foundit (email alert)"),
         ("timesjobs", "TimesJobs (email alert)"),
         ("hirist", "Hirist (email alert)"),
+        ("iimjobs", "IIMJobs (email alert)"),
     ]
     for key, label in mapping:
         if key in blob:
@@ -322,14 +329,16 @@ def _guess_source(from_header: str, subject: str) -> str:
 def _extract_jobs_from_email(subject: str, from_header: str, body: str, message_id: str) -> list[dict]:
     source = _guess_source(from_header, subject)
     urls = []
-    for m in URL_RE.findall(body + " " + subject):
-        u = m.rstrip(").,;\"'")
+    content = body + " " + subject
+    for m in URL_RE.finditer(content):
+        u = m.group(0).rstrip(").,;\"'")
         low = u.lower()
         if any(
             x in low
             for x in (
                 "naukri.com",
-                "linkedin.com/jobs",
+                "naukrigulf.com",
+                "linkedin.com",
                 "shine.com",
                 "monster",
                 "bayt.com",
@@ -338,24 +347,27 @@ def _extract_jobs_from_email(subject: str, from_header: str, body: str, message_
                 "foundit.in",
                 "timesjobs",
                 "hirist.com",
+                "iimjobs.com",
+                "catererglobal.com",
+                "gulfjobs.com",
                 "greenhouse.io",
                 "lever.co",
             )
         ):
             if "unsubscribe" in low or "mailto:" in low:
                 continue
-            urls.append(u)
+            urls.append((u, m.start(), m.end()))
     seen, uniq = set(), []
-    for u in urls:
+    for u, start, end in urls:
         if u not in seen:
             seen.add(u)
-            uniq.append(u)
+            uniq.append((u, start, end))
     jobs = []
     title_guess = subject
     for noise in ("job alert", "new jobs", "recommended jobs", "jobs for you", "|", "-"):
         title_guess = re.sub(re.escape(noise), " ", title_guess, flags=re.I)
     title_guess = normalize_text(title_guess)[:200] or "Role from job alert"
-    for i, url in enumerate(uniq[:8]):
+    for i, (url, start, end) in enumerate(uniq[:8]):
         loc = ""
         for city in (
             "dubai", "abu dhabi", "riyadh", "doha", "noida", "gurgaon", "gurugram",
@@ -364,6 +376,19 @@ def _extract_jobs_from_email(subject: str, from_header: str, body: str, message_
             if city in body.lower() or city in subject.lower():
                 loc = city.title()
                 break
+        # Only use a nearby pre-link age label; a wider window can accidentally borrow
+        # the posting age from another listing in the same alert email.
+        context = content[max(0, start - 120):start]
+        posted_at = None
+        relative_date = re.search(
+            r"\b(?:posted\s+)?(?:\d+(?:\.\d+)?|a|an)\s*(?:minutes?|mins?|m|hours?|hrs?|h|days?|d)\s+ago\b",
+            context,
+            flags=re.IGNORECASE,
+        )
+        if relative_date:
+            from job_sources import _parse_iso
+
+            posted_at = _parse_iso(relative_date.group(0))
         jobs.append(
             {
                 "source": source,
@@ -376,7 +401,9 @@ def _extract_jobs_from_email(subject: str, from_header: str, body: str, message_
                 "description": body[:4000],
                 "employment_type": "",
                 "salary": "",
-                "posted_at": _now(),
+                # Email arrival time is not a verified posting date. Keep unknown dates hidden
+                # from the portal's strict last-24-hours view.
+                "posted_at": posted_at,
                 "raw_json": json.dumps({"message_id": message_id, "from": from_header, "subject": subject})[:5000],
             }
         )
@@ -391,7 +418,7 @@ async def fetch_jobs_from_gmail() -> tuple[list[dict], str | None]:
     if not token:
         return [], "Gmail not connected — open /api/gmail/auth after setting Google OAuth env vars"
     init_gmail_db()
-    from_q = " OR ".join(f"from:{d}" for d in ALERT_SENDERS[:8])
+    from_q = " OR ".join(f"from:{d}" for d in ALERT_SENDERS)
     q = f"({from_q}) OR subject:(job alert OR jobs for you OR recommended jobs)"
     async with httpx.AsyncClient(timeout=40) as client:
         r = await client.get(

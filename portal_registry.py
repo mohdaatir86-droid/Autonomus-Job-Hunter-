@@ -65,7 +65,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "n/a",
         "integration_health": "configured_if_key_set",
         "last_successful_test": None,
-        "notes": "Discovery only. Surfaces Naukri/LinkedIn/Indeed/Bayt/GulfTalent links when present.",
+        "notes": "Automatic search through Google Jobs results; the returned source is attributed to a board when available. Coverage depends on Google indexing and is not a direct portal feed.",
     },
     "greenhouse": {
         "display_name": "Greenhouse (public boards)",
@@ -108,7 +108,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "unsupported_application",
         "last_successful_test": None,
-        "notes": "Discovery only (SerpApi/Gmail). Authenticated application not implemented. Do not store passwords.",
+        "notes": "Automatic search through Google Jobs results; Gmail alerts can be added after read-only Gmail is connected. Direct portal API/login is not configured; applications are not submitted.",
     },
     "linkedin": {
         "display_name": "LinkedIn Jobs",
@@ -123,7 +123,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "unsupported_application",
         "last_successful_test": None,
-        "notes": "Discovery only. Easy Apply / authenticated apply not implemented.",
+        "notes": "Automatic search through Google Jobs results; Gmail alerts can be added after read-only Gmail is connected. Direct authenticated job search is not configured; Easy Apply is not implemented.",
     },
     "indeed": {
         "display_name": "Indeed",
@@ -138,7 +138,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "unsupported_application",
         "last_successful_test": None,
-        "notes": "Discovery only via SerpApi/Gmail. No automated apply.",
+        "notes": "Automatic search through Google Jobs results; Gmail alerts can be added after read-only Gmail is connected. Direct portal API/login is not configured; applications are not submitted.",
     },
     "foundit": {
         "display_name": "Foundit (Monster)",
@@ -168,7 +168,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "unsupported_application",
         "last_successful_test": None,
-        "notes": "Discovery only. Gulf market focus.",
+        "notes": "Automatic Gulf search through Google Jobs results; Gmail alerts can be added after read-only Gmail is connected. Direct portal API/login is not configured.",
     },
     "bayt": {
         "display_name": "Bayt",
@@ -183,7 +183,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "unsupported_application",
         "last_successful_test": None,
-        "notes": "Discovery only. Gulf market focus.",
+        "notes": "Automatic Gulf search through Google Jobs results; Gmail alerts can be added after read-only Gmail is connected. Direct portal API/login is not configured.",
     },
     "naukri_gulf": {
         "display_name": "Naukri Gulf",
@@ -198,7 +198,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "via_google_jobs",
         "last_successful_test": None,
-        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
+        "notes": "Automatic search through Google Jobs results; Gmail alerts can be added after read-only Gmail is connected. Direct portal API/login is not configured; applications are not submitted.",
     },
     "shine": {
         "display_name": "Shine",
@@ -213,7 +213,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "via_google_jobs",
         "last_successful_test": None,
-        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
+        "notes": "Automatic search through Google Jobs results; Gmail alerts can be added after read-only Gmail is connected. Direct portal API/login is not configured; applications are not submitted.",
     },
     "hirist": {
         "display_name": "Hirist",
@@ -228,7 +228,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "via_google_jobs",
         "last_successful_test": None,
-        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
+        "notes": "Automatic search through Google Jobs results; Gmail alerts can be added after read-only Gmail is connected. Direct portal API/login is not configured; applications are not submitted.",
     },
     "iimjobs": {
         "display_name": "IIMJobs",
@@ -243,7 +243,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "via_google_jobs",
         "last_successful_test": None,
-        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
+        "notes": "Automatic search through Google Jobs results; Gmail alerts can be added after read-only Gmail is connected. Direct portal API/login is not configured; applications are not submitted.",
     },
     "timesjobs": {
         "display_name": "TimesJobs",
@@ -258,7 +258,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "via_google_jobs",
         "last_successful_test": None,
-        "notes": "Discovery through Google Jobs/SerpApi results and job-alert emails when connected. No direct portal login or application.",
+        "notes": "Automatic search through Google Jobs results; Gmail alerts can be added after read-only Gmail is connected. Direct portal API/login is not configured; applications are not submitted.",
     },
     "catererglobal": {
         "display_name": "CatererGlobal",
@@ -273,7 +273,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "via_google_jobs",
         "last_successful_test": None,
-        "notes": "Discovery through Google Jobs/SerpApi results. No direct portal login or application.",
+        "notes": "Automatic Gulf search through Google Jobs results. Direct portal API/login is not configured; coverage depends on Google indexing.",
     },
     "gulfjobs": {
         "display_name": "GulfJobs",
@@ -288,7 +288,7 @@ PORTAL_REGISTRY: dict[str, dict[str, Any]] = {
         "auth_status": "not_configured",
         "integration_health": "via_google_jobs",
         "last_successful_test": None,
-        "notes": "Discovery through Google Jobs/SerpApi results. No direct portal login or application.",
+        "notes": "Automatic Gulf search through Google Jobs results. Direct portal API/login is not configured; coverage depends on Google indexing.",
     },
 }
 
