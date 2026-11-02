@@ -104,7 +104,8 @@ If your Render plan does not support persistent disks, use managed PostgreSQL be
 
 - **Application submission is disabled.** The service finds, scores and tracks vacancies and prepares drafts; it does not log into job sites or submit applications.
 - Greenhouse/Lever form help only fills supported visible fields; LinkedIn, Naukri and Shine are discovery-only. No CAPTCHA/OTP bypass, fabricated answers, or automatic acceptance of legal declarations is implemented.
-- Naukri, Shine, Foundit, Hirist, IIMJobs, TimesJobs, Naukri Gulf, Bayt, GulfTalent, CatererGlobal and GulfJobs are discovery-only through search results and available job-alert emails. These portals do not support automated application in this project.
+- Naukri, LinkedIn, Indeed, Foundit, Shine, Hirist, IIMJobs, TimesJobs, Naukri Gulf, Bayt, GulfTalent, CatererGlobal and GulfJobs are auto-searched through Google Jobs/SerpApi results and, after read-only Gmail is connected, job-alert emails. This is aggregated coverage, not a direct API or login to each board; results depend on what Google indexes and identifies. The Sources cards report how many unique results were attributed to each portal in the last hunt.
+- Gmail job-alert imports only count a listing as recent when the email contains a parseable relative posting age. Email arrival time is not treated as the job's posting time, so alerts with unknown dates remain hidden by the strict last-24-hours filter.
 - A future application workflow must use official APIs or explicitly permitted methods and pause for human input on assessments, consent, work authorization, salary commitments, or legal questions.
 - Public job APIs do not cover every employer, country, or job board. Results depend on provider availability and data coverage.
 - The current match score is a keyword heuristic, not a prediction of hiring success.

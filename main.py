@@ -831,18 +831,37 @@ def sources():
             item["detail"] = item["connection_mode"]
             item["fetched"] = 0
         item["healthy"] = item["status"] == "working"
+    portal_coverage = {
+        key: portal
+        for key, portal in get_portal_registry()["portals"].items()
+        if portal.get("market_focus")
+    }
+    google_jobs_status = (by_name.get("Google Jobs via SerpApi") or {}).get("status", "unknown")
+    portal_counts = report.get("portal_counts") or {}
+    portal_counts_available = isinstance(report.get("portal_counts"), dict)
+    for key, portal in portal_coverage.items():
+        portal["fetch_channel"] = (
+            "Google Jobs + connected Gmail alerts"
+            if gmail.get("connected")
+            else "Google Jobs; Gmail alerts need connection"
+        )
+        portal["source_search_status"] = google_jobs_status
+        portal["last_hunt_fetched"] = int(portal_counts.get(key, 0) or 0) if portal_counts_available else None
+        portal["last_hunt_checked_at"] = report.get("checked_at") if portal_counts_available else None
+        if not portal.get("discovery"):
+            portal["integration_health"] = "key_missing"
+        elif google_jobs_status in {"unauthorized", "rate_limited", "unavailable"}:
+            portal["integration_health"] = google_jobs_status
+        elif google_jobs_status in {"working", "degraded"}:
+            portal["integration_health"] = "aggregated_search"
     return {
         "sources": catalog,
         "checked_at": report.get("checked_at"),
-        "note": "Submission stays off unless BROWSER_ALLOW_SUBMIT is explicitly true. Ready means the last hunt succeeded for that source.",
+        "note": "Portal results come from Google Jobs indexing and, after Gmail read-only access is connected, job-alert emails. Direct portal APIs and logins are not configured. Coverage depends on provider results; applications are not submitted.",
         "gmail": gmail,
         "ai": ai_status(),
         "whatsapp": notify_status(),
-        "portal_coverage": {
-            key: portal
-            for key, portal in get_portal_registry()["portals"].items()
-            if portal.get("market_focus")
-        },
+        "portal_coverage": portal_coverage,
         "live_applications_enabled": False,
         "admin_locked": bool(os.getenv("PORTAL_ACCESS_TOKEN", "").strip()),
     }
