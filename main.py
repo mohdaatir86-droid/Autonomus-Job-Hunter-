@@ -790,7 +790,7 @@ async def notify_test():
 
 @app.get("/api/sources")
 def sources():
-    from job_sources import get_source_report, BUILTIN_GREENHOUSE_BOARDS
+    from job_sources import get_source_report, BUILTIN_GREENHOUSE_BOARDS, BUILTIN_LEVER_SITES
     from portal_registry import get_portal_registry
 
     gmail = dict(get_gmail_status())
@@ -817,8 +817,8 @@ def sources():
         {
             "name": "Lever company boards",
             "type": "Public company ATS API",
-            "configured": bool(os.getenv("LEVER_SITES", "").strip()),
-            "connection_mode": "LEVER_SITES slugs",
+            "configured": True,
+            "connection_mode": "LEVER_SITES slugs" if os.getenv("LEVER_SITES", "").strip() else "Built-in public boards: " + ", ".join(BUILTIN_LEVER_SITES),
         },
         {
             "name": "Gmail job alerts",
@@ -845,6 +845,10 @@ def sources():
             item["status"] = "missing_configuration"
             item["detail"] = item["connection_mode"]
             item["fetched"] = 0
+        if item["name"] == "Lever company boards" and item["status"] == "missing_configuration" and "LEVER_SITES not set" in item.get("detail", ""):
+            item.update(status="unknown", detail="Public Lever boards enabled; run discovery to check them.", fetched=0)
+        if item["name"] == "Gmail job alerts" and gmail.get("connected") and item["status"] == "missing_configuration":
+            item.update(status="unknown", detail="Gmail connected; run discovery to import job alerts.", fetched=0)
         item["healthy"] = item["status"] == "working"
     portal_coverage = {
         key: portal

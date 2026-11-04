@@ -468,16 +468,20 @@ async def fetch_greenhouse(client, limit):
     return out, ("; ".join(errors) if errors else None)
 
 
+BUILTIN_LEVER_SITES = ("meesho", "lalamove")
+
+
 async def fetch_lever(client, limit):
-    sites = [s.strip() for s in os.getenv("LEVER_SITES", "").split(",") if s.strip()]
-    if not sites:
-        return [], "LEVER_SITES not set"
+    configured = [s.strip() for s in os.getenv("LEVER_SITES", "").split(",") if s.strip()]
+    sites = configured or list(BUILTIN_LEVER_SITES)
+    settings = get_settings()
     out, errors = [], []
     for site in sites[:15]:
         try:
             data = await _get_json(client, f"https://api.lever.co/v0/postings/{quote_plus(site)}")
             rows = data if isinstance(data, list) else data.get("data") or []
-            for raw in rows[:limit]:
+            candidates = []
+            for raw in rows:
                 cats = raw.get("categories") or {}
                 loc = cats.get("location") or raw.get("location") or ""
                 normalized = {
@@ -491,7 +495,15 @@ async def fetch_lever(client, limit):
                 }
                 job = _clean_job(normalized, f"Lever/{site}")
                 if job:
-                    out.append(job)
+                    candidates.append(job)
+            # Relevance comes before the per-board cap: Gulf listings may be
+            # beyond the first hundred entries on a global company board.
+            candidates.sort(key=lambda job: (
+                job["country"] in settings["target_countries"] and matches_preferences(job, settings),
+                score_job(job, settings)[0],
+                job.get("posted_at") or "",
+            ), reverse=True)
+            out.extend(candidates[:limit])
         except Exception as e:
             summary = _safe_source_error(e)
             log.warning("Lever board %s failed: %s", site, summary)
