@@ -95,11 +95,11 @@ def get_gmail_status() -> dict[str, Any]:
     hint = (
         "Create a Google Cloud OAuth client (Web application) with redirect URI "
         + _redirect_uri()
-        + ". Enable the Gmail API. Set the missing variable names in Render, then open /api/gmail/auth. "
+        + ". Enable the Gmail API. Set the missing variable names in Render, then sign into the private dashboard and click Connect Gmail job alerts. "
         "Create job alerts on Naukri, Naukri Gulf, LinkedIn, Indeed, Foundit, Shine, Hirist, IIMJobs, TimesJobs, GulfTalent, Bayt, CatererGlobal and GulfJobs to that Gmail."
     )
     if gmail_configured() and not missing and not connected:
-        hint = "OAuth credentials are set. Open /api/gmail/auth and approve read-only Gmail access. No password is requested."
+        hint = "OAuth credentials are set. Sign into the private dashboard, click Connect Gmail job alerts and approve read-only Gmail access. No password is requested."
     elif connected:
         hint = "Connected. New job-alert emails are imported on the next hunt and are not imported twice."
     return {
@@ -430,7 +430,7 @@ async def fetch_jobs_from_gmail() -> tuple[list[dict], str | None]:
         return [], "GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set"
     token = await _access_token()
     if not token:
-        return [], "Gmail not connected — open /api/gmail/auth after setting Google OAuth env vars"
+        return [], "Gmail not connected — use Connect Gmail job alerts in the private dashboard after setting Google OAuth env vars"
     init_gmail_db()
     from_q = " OR ".join(f"from:{d}" for d in ALERT_SENDERS)
     q = f"({from_q}) OR subject:(job alert OR jobs for you OR recommended jobs)"
