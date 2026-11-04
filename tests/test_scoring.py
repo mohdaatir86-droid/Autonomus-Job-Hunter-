@@ -33,8 +33,8 @@ def test_database_initializes_cleanly(tmp_path, monkeypatch):
     settings = job_hunter.get_settings()
     job_hunter.init_db()
     assert "India" in settings["target_countries"]
-    assert "Canada" in settings["target_countries"]
-    assert "Bahrain" not in settings["target_countries"]
+    assert "Canada" not in settings["target_countries"]
+    assert "Bahrain" in settings["target_countries"]
     assert "Program Manager" in settings["target_titles"]
     assert len(settings["target_countries"]) == 7
 

@@ -37,8 +37,9 @@ def test_n8n_discovery_route_requires_dedicated_bearer_token(monkeypatch):
         assert accepted.json()["new_jobs"] == 1
         assert calls == [True]
 
-        # Preserve the existing portal route while adding the separately guarded n8n route.
-        portal = client.post("/api/hunt")
+        # The portal route requires the owner key; n8n keeps a separate token.
+        monkeypatch.setenv("PORTAL_ACCESS_TOKEN", "owner-key-" * 5)
+        portal = client.post("/api/hunt", headers={"Authorization": "Bearer " + "owner-key-" * 5})
         assert portal.status_code == 200
         assert calls == [True, True]
     finally:

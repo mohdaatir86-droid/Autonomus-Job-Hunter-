@@ -7,7 +7,7 @@ import json
 import secrets
 import time
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,11 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from job_hunter import get_settings, save_settings, init_db
-from job_sources import hunt_jobs, get_stats, list_jobs, set_job_status
+from job_sources import hunt_jobs, get_stats, list_jobs, set_job_status, LISTABLE_COUNTRIES
 from gmail_alerts import build_auth_url, exchange_code, get_gmail_status, init_gmail_db, verify_oauth_state
 from ai_assist import ai_status, generate_form_answers
-from notify import notify_status, send_whatsapp
-from database import postgres_enabled, database_diagnostics
+from notify import notify_status, send_notification
+from database import postgres_enabled, database_diagnostics, initialize_database_schema
 from automation_settings import init_automation_settings, get_automation_settings, save_automation_settings
 from browser_worker import run_application_worker, browser_health_check
 from automation_routes import router as automation_router
@@ -141,6 +141,7 @@ def _verify_google_credential(credential: str) -> dict[str, Any]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    initialize_database_schema()
     init_db()
     init_workflow_db()
     init_gmail_db()
@@ -197,6 +198,7 @@ async def lifespan(app: FastAPI):
                     candidates = list_jobs(
                         min_score=policy["min_score"],
                         status=None,
+                        draft_candidates=True,
                         limit=policy["max_per_run"],
                     )
                     prepared_count = 0
@@ -273,7 +275,13 @@ async def protect_private_candidate_data(request, call_next):
                 content={"detail": "Unauthorized."},
             )
     protected = (
-        path == "/api/profile"
+        (request.method not in {"GET", "HEAD", "OPTIONS"} and path.startswith("/api/")
+         and path not in {"/api/integrations/n8n/hunt", "/api/auth/google/session", "/api/auth/logout"})
+        or path == "/api/gmail/auth"
+        or path == "/api/gmail/status"
+        or path == "/api/setup"
+        or path == "/health/browser"
+        or path == "/api/profile"
         or path.startswith("/api/profile/")
         or path == "/api/applications"
         or path.startswith("/api/applications/")
@@ -287,7 +295,7 @@ async def protect_private_candidate_data(request, call_next):
     )
     if protected and request.method != "OPTIONS":
         expected = os.getenv("PORTAL_ACCESS_TOKEN", "").strip()
-        if not expected:
+        if len(expected) < 32:
             return JSONResponse(
                 status_code=503,
                 content={"detail": "Private profile features are locked until PORTAL_ACCESS_TOKEN is configured in Render."},
@@ -335,14 +343,14 @@ def health():
         "database_mode": "postgresql" if postgres_enabled() else "sqlite",
         "time": datetime.now(timezone.utc).isoformat(),
         "live_applications_enabled": False,
-        "browser_submit_enabled": os.getenv("BROWSER_ALLOW_SUBMIT", "false").lower() == "true",
+        "browser_submit_enabled": False,
         "admin_endpoints_locked": bool(os.getenv("PORTAL_ACCESS_TOKEN", "").strip()),
         "application_preparation_enabled": True,
         "resume_profile_configured": get_profile().get("has_resume", False),
         "browser_worker_enabled": os.getenv("BROWSER_WORKER_ENABLED", "false").lower() == "true",
         "gmail": get_gmail_status(),
         "ai": ai_status(),
-        "whatsapp": notify_status(),
+        "notifications": notify_status(),
     }
 
 
@@ -450,7 +458,7 @@ def jobs(
     opportunity: str | None = None,
     min_score: int = Query(default=0, ge=0, le=100),
     status: str | None = None,
-    posted_within_days: int = Query(default=1, ge=1, le=1),
+    posted_within_days: int | None = Query(default=None, ge=1, le=365),
     q: str | None = Query(default=None, max_length=120),
     source: str | None = Query(default=None, max_length=80),
     limit: int = Query(default=100, ge=1, le=500),
@@ -474,13 +482,7 @@ def jobs(
 @app.post("/api/hunt")
 @app.post("/api/integrations/n8n/hunt")
 async def hunt():
-    result = await hunt_jobs()
-    if "whatsapp_notify" not in result:
-        result["whatsapp_notify"] = {
-            "sent": False,
-            "note": "Update job_sources for auto-notify on new high matches",
-        }
-    return result
+    return await hunt_jobs()
 
 
 @app.get("/api/settings")
@@ -493,6 +495,7 @@ def update_settings(payload: dict[str, Any]):
     allowed = {
         "target_countries",
         "target_titles",
+        "preferred_locations",
         "min_match_score",
         "max_results_per_source",
         "min_india_salary_lpa",
@@ -505,9 +508,11 @@ def update_settings(payload: dict[str, Any]):
     for key, value in payload.items():
         if key not in allowed:
             continue
-        if key in {"target_countries", "target_titles"}:
-            if not isinstance(value, list) or not value or not all(isinstance(item, str) and item.strip() for item in value):
+        if key in {"target_countries", "target_titles", "preferred_locations"}:
+            if not isinstance(value, list) or (key != "preferred_locations" and not value) or len(value) > 100 or not all(isinstance(item, str) and item.strip() and len(item) <= 150 for item in value):
                 raise HTTPException(status_code=422, detail=key + " must be a non-empty list of strings")
+            if key == "target_countries" and any(item.strip() not in LISTABLE_COUNTRIES for item in value):
+                raise HTTPException(status_code=422, detail="Choose supported countries: India, Gulf countries, or Canada.")
             current[key] = list(dict.fromkeys(item.strip() for item in value if item.strip()))
         elif key == "min_match_score":
             if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 100:
@@ -520,9 +525,9 @@ def update_settings(payload: dict[str, Any]):
     preference_rules = {
         "min_india_salary_lpa": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 500,
         "min_experience_years": lambda v: isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 60,
-        "work_arrangement": lambda v: v in {"all", "onsite", "hybrid", "remote"},
+        "work_arrangement": lambda v: isinstance(v, str) and v in {"all", "onsite", "hybrid", "remote"},
         "posted_within_days": lambda v: isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 365,
-        "visa_preference": lambda v: v in {"any", "sponsor"},
+        "visa_preference": lambda v: isinstance(v, str) and v in {"any", "sponsor"},
     }
     for key, validator in preference_rules.items():
         if key in payload:
@@ -565,7 +570,7 @@ async def automation_prepare():
     policy = get_automation_settings()
     if not policy.get("enabled"):
         raise HTTPException(status_code=409, detail="Automation mode is OFF. Enable it in the dashboard first.")
-    candidates = list_jobs(min_score=policy["min_score"], status=None, limit=policy["max_per_run"])
+    candidates = list_jobs(min_score=policy["min_score"], status=None, limit=policy["max_per_run"], draft_candidates=True)
     prepared, skipped, errors = [], [], []
     for job in candidates:
         if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant", "closed"}:
@@ -671,7 +676,7 @@ async def upload_resume(file: UploadFile = File(...)):
 async def auto_apply_queue():
     require_application_profile()
     policy = get_automation_settings()
-    candidates = list_jobs(min_score=policy["min_score"], status=None, limit=policy["max_per_run"])
+    candidates = list_jobs(min_score=policy["min_score"], status=None, limit=policy["max_per_run"], draft_candidates=True)
     prepared, skipped, errors = [], [], []
     for job in candidates:
         if job.get("status") in {"applied_manually", "interview", "offer", "rejected", "not_relevant", "closed"}:
@@ -747,28 +752,37 @@ def gmail_status():
     return get_gmail_status()
 
 
-@app.get("/api/gmail/auth")
-def gmail_auth():
+@app.post("/api/gmail/auth")
+def gmail_auth(request: Request):
+    if not (get_profile().get("email") or "").strip():
+        raise HTTPException(status_code=409, detail="Save your profile email before connecting Gmail.")
     try:
         url = build_auth_url()
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-    return RedirectResponse(url)
+    state = parse_qs(urlparse(url).query)["state"][0]
+    response = JSONResponse({"url": url})
+    secure = request.url.scheme == "https" or os.getenv("RENDER_EXTERNAL_URL", "").startswith("https://")
+    response.set_cookie("jh_gmail_state", state, max_age=600, httponly=True, secure=secure, samesite="lax", path="/api/gmail")
+    return response
 
 
 @app.get("/api/gmail/callback")
-async def gmail_callback(code: str = "", state: str = ""):
-    if not verify_oauth_state(state):
-        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+async def gmail_callback(request: Request, code: str = "", state: str = ""):
+    cookie_state = request.cookies.get("jh_gmail_state", "")
+    if not cookie_state or not state or not hmac.compare_digest(cookie_state, state) or not verify_oauth_state(state, consume=True):
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state. Connect Gmail again from your private profile.")
     result = await exchange_code(code)
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "oauth failed"))
-    return RedirectResponse("/")
+    response = RedirectResponse("/")
+    response.delete_cookie("jh_gmail_state", path="/api/gmail")
+    return response
 
 
 @app.post("/api/notify/test")
 async def notify_test():
-    result = await send_whatsapp("Job Hunter test: WhatsApp push is working.")
+    result = await send_notification("Job Hunter test: your job alerts are connected. New matching operations roles will appear here after discovery.")
     if not result.get("sent"):
         raise HTTPException(status_code=400, detail=result)
     return result
@@ -779,7 +793,8 @@ def sources():
     from job_sources import get_source_report, BUILTIN_GREENHOUSE_BOARDS
     from portal_registry import get_portal_registry
 
-    gmail = get_gmail_status()
+    gmail = dict(get_gmail_status())
+    gmail.pop("email", None)
     report = get_source_report() or {}
     by_name = {item.get("name"): item for item in (report.get("sources") or [])}
     greenhouse_env = bool(os.getenv("GREENHOUSE_BOARDS", "").strip())
@@ -860,8 +875,21 @@ def sources():
         "note": "Portal results come from Google Jobs indexing and, after Gmail read-only access is connected, job-alert emails. Direct portal APIs and logins are not configured. Coverage depends on provider results; applications are not submitted.",
         "gmail": gmail,
         "ai": ai_status(),
-        "whatsapp": notify_status(),
+        "notifications": notify_status(),
         "portal_coverage": portal_coverage,
         "live_applications_enabled": False,
         "admin_locked": bool(os.getenv("PORTAL_ACCESS_TOKEN", "").strip()),
+    }
+
+
+@app.get("/api/setup")
+def setup_status():
+    ready, missing = application_profile_readiness()
+    return {
+        "profile": {"ready": ready, "missing": missing},
+        "discovery": {"public_sources": True, "google_jobs_configured": bool(os.getenv("SERPAPI_API_KEY", "").strip())},
+        "notifications": notify_status(),
+        "scheduler": {"enabled": os.getenv("ENABLE_SCHEDULER", "true").lower() == "true", "internal_discovery": internal_hunt_scheduler_enabled()},
+        "submission_enabled": False,
+        "settings": get_settings(),
     }

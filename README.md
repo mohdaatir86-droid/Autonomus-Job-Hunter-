@@ -1,19 +1,21 @@
 # Autonomous Job Hunter
 
-A deployable MVP for discovering and scoring **operations leadership** vacancies tailored to a QSR / Q-commerce / dark-store / multi-unit operations profile (India, Gulf and Canada).
+A deployable MVP for discovering and scoring **operations leadership** vacancies tailored to a QSR / Q-commerce / dark-store / multi-unit operations profile (Delhi NCR, Uttar Pradesh, Dehradun and the Gulf).
 
 This repository is intentionally independent of Product Hunter.
+
+See [the operating runbook](RUNBOOK.md) for secure setup, email alerts, scheduling, database migrations and deployment checks.
 
 ## Target profile (current defaults)
 
 | Field | Value |
 |-------|--------|
 | **Roles** | Senior Cluster Manager, Cluster Manager, City / Area Operations Manager, Head of Operations, Warehouse / Fulfilment / Dark Store Manager, Supply Chain / Last-Mile Operations Manager, QSR Multi-Unit Manager |
-| **Countries** | India, United Arab Emirates, Saudi Arabia, Qatar, Kuwait, Oman, Canada |
+| **Countries** | India, United Arab Emirates, Saudi Arabia, Qatar, Kuwait, Oman, Bahrain |
 | **Experience** | 8+ years multi-unit operations, dark stores, Q-commerce, QSR expansion |
 | **Key strengths scored** | Store launches, SLA, shrinkage control, large team leadership (450+), 3PL, SOPs, inventory |
 
-These defaults are editable through `POST /api/settings` and the dashboard profile section.
+These defaults are editable through authenticated `POST /api/settings` and the dashboard private profile section. Preferred Indian locations are Delhi NCR, Uttar Pradesh and Dehradun. Existing saved preferences are preserved.
 
 ## Current capabilities
 
@@ -69,7 +71,7 @@ Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 Example manual run:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/hunt
+curl -X POST -H "Authorization: Bearer $PORTAL_ACCESS_TOKEN" http://127.0.0.1:8000/api/hunt
 ```
 
 Optional company board slugs can be set as comma-separated environment variables:

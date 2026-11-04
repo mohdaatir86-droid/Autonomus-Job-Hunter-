@@ -10,16 +10,16 @@ import gmail_alerts
 
 def test_default_markets_and_program_manager():
     assert job_hunter.DEFAULT_COUNTRIES == [
-        "India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada",
+        "India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Bahrain",
     ]
-    assert "Bahrain" not in job_hunter.DEFAULT_COUNTRIES
+    assert "Bahrain" in job_hunter.DEFAULT_COUNTRIES
     assert "Program Manager" in job_hunter.DEFAULT_TITLES
 
 
 def test_lucknow_and_gulf_are_target_markets():
     assert job_sources.is_target_market_job({"location": "Lucknow, India"}, "India")
     assert job_sources.is_target_market_job({"location": "Doha, Qatar"}, "Qatar")
-    assert "Bahrain" not in job_sources.LISTABLE_COUNTRIES
+    assert "Bahrain" in job_sources.LISTABLE_COUNTRIES
 
 
 def test_operations_program_manager_scores_above_generic_cap():

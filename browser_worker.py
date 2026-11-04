@@ -127,6 +127,8 @@ def detect_portal(url: str) -> str:
 
 
 async def _run(draft_id: int, dry_run: bool = True) -> dict:
+    if dry_run is not True:
+        return {"status": "blocked", "reason": "submission_disabled", "detail": "Applications must be reviewed and submitted manually on the employer website."}
     if os.getenv("BROWSER_WORKER_ENABLED", "false").lower() != "true":
         return {
             "status": "disabled",
@@ -320,74 +322,12 @@ async def _run(draft_id: int, dry_run: bool = True) -> dict:
             except ValueError:
                 pass
 
-            allow_submit = os.getenv("BROWSER_ALLOW_SUBMIT", "false").lower() == "true"
-            if dry_run or not allow_submit:
-                return {
-                    "status": "ready_to_submit",
-                    "filled_fields": filled,
-                    "attempt_id": attempt["id"],
-                    "detail": "Form filled; submission disabled until BROWSER_ALLOW_SUBMIT=true and dry_run=false.",
-                }
-
-            transition(attempt["id"], "submitting", note="click submit")
-            submit = form.locator(
-                'button[type="submit"], input[type="submit"], '
-                'button:has-text("Submit application"), button:has-text("Submit"), button:has-text("Apply")'
-            )
-            if await submit.count() == 0:
-                transition(attempt["id"], "failed", note="submit_button_not_found", reason="no_submit")
-                return {
-                    "status": "blocked",
-                    "reason": "submit_button_not_found",
-                    "filled_fields": filled,
-                    "attempt_id": attempt["id"],
-                }
-
-            await submit.first.click(timeout=5000)
-            await page.wait_for_timeout(2500)
-            result_text = (await page.locator("body").inner_text(timeout=5000))[:20000]
-            if CONFIRM_TERMS.search(result_text):
-                evidence = CONFIRM_TERMS.search(result_text).group(0)[:200]
-                update_draft_status(
-                    draft_id,
-                    "applied_manually",
-                    "Browser worker confirmed submission at " + _now(),
-                )
-                transition(
-                    attempt["id"],
-                    "submitted",
-                    note="confirmation detected",
-                    confirmation_evidence=evidence,
-                )
-                _event(
-                    draft_id,
-                    "submission_confirmed",
-                    "ATS confirmation: " + evidence + " host=" + (urlparse(page.url).hostname or ""),
-                )
-                return {
-                    "status": "submitted_confirmed",
-                    "filled_fields": filled,
-                    "confirmation_detected": True,
-                    "confirmation_evidence": evidence,
-                    "attempt_id": attempt["id"],
-                }
-
-            transition(
-                attempt["id"],
-                "submitted_unverified",
-                note="clicked submit but no confirmation text",
-                reason="no_confirmation",
-            )
-            _event(
-                draft_id,
-                "submission_unconfirmed",
-                "Submit clicked; no confirmation text — verify manually before retry.",
-            )
             return {
-                "status": "submitted_unverified",
+                "status": "ready_for_review",
                 "filled_fields": filled,
-                "confirmation_detected": False,
                 "attempt_id": attempt["id"],
+                "url": url,
+                "detail": "Dry-run check complete. The temporary browser closes without submitting. Open the employer link to review and apply manually.",
             }
         finally:
             await context.close()
@@ -402,7 +342,7 @@ async def browser_health_check() -> dict:
     """Launch Chromium briefly and report version. Never exposes secrets."""
     result = {
         "browser_worker_enabled": os.getenv("BROWSER_WORKER_ENABLED", "false").lower() == "true",
-        "allow_submit": os.getenv("BROWSER_ALLOW_SUBMIT", "false").lower() == "true",
+        "allow_submit": False,
         "playwright_available": False,
         "chromium_launchable": False,
         "chromium_version": None,

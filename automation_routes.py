@@ -49,7 +49,9 @@ def application_attempt_events(attempt_id: int):
 @router.post("/api/automation/run-browser")
 async def automation_run_browser(payload: dict[str, Any] | None = None):
     payload = payload or {}
-    dry_run = bool(payload.get("dry_run", True))
+    dry_run = payload.get("dry_run", True)
+    if dry_run is not True:
+        raise HTTPException(status_code=409, detail="Submission is disabled. Use dry_run=true and apply manually after review.")
     if os.getenv("BROWSER_WORKER_ENABLED", "false").lower() != "true":
         raise HTTPException(
             status_code=503,
@@ -86,14 +88,10 @@ async def automation_run_browser(payload: dict[str, Any] | None = None):
             results.append({"draft_id": draft.get("id"), "status": "error", "error": str(exc)[:180]})
     return {
         "dry_run": dry_run,
-        "allow_submit_env": os.getenv("BROWSER_ALLOW_SUBMIT", "false").lower() == "true",
+        "allow_submit_env": False,
         "processed": processed,
         "results": results,
-        "message": (
-            "Dry-run only; no submit clicked."
-            if dry_run or os.getenv("BROWSER_ALLOW_SUBMIT", "false").lower() != "true"
-            else "Live submit permitted by env — verify confirmations carefully."
-        ),
+        "message": "Dry-run check only. Review and submit manually on the employer website.",
     }
 
 

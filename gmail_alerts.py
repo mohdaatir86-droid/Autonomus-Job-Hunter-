@@ -60,9 +60,8 @@ def _connect():
 
 
 def init_gmail_db():
-    if postgres_enabled():
-        return  # PostgreSQL tables are created by the Supabase schema migration.
     with _connect() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS gmail_oauth_states (state_hash TEXT PRIMARY KEY, expires_at BIGINT NOT NULL)")
         conn.execute(
             """CREATE TABLE IF NOT EXISTS gmail_tokens (
             id INTEGER PRIMARY KEY CHECK(id=1),
@@ -136,6 +135,10 @@ def build_auth_url(state: str | None = None) -> str:
     payload = f"{issued}.{nonce}"
     signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
     signed_state = f"{payload}.{signature}"
+    init_gmail_db()
+    with _connect() as conn:
+        conn.execute("DELETE FROM gmail_oauth_states WHERE expires_at < ?", (int(issued),))
+        conn.execute("INSERT INTO gmail_oauth_states(state_hash,expires_at) VALUES (?,?)", (hashlib.sha256(signed_state.encode()).hexdigest(), int(issued) + 600))
     params = {
         "client_id": os.getenv("GOOGLE_CLIENT_ID").strip(),
         "redirect_uri": _redirect_uri(),
@@ -148,7 +151,7 @@ def build_auth_url(state: str | None = None) -> str:
     return GOOGLE_AUTH + "?" + urlencode(params)
 
 
-def verify_oauth_state(state: str | None) -> bool:
+def verify_oauth_state(state: str | None, *, consume: bool = False) -> bool:
     secret = _oauth_state_secret()
     if not secret or not state:
         return False
@@ -159,7 +162,14 @@ def verify_oauth_state(state: str | None) -> bool:
             return False
         payload = f"{issued}.{nonce}"
         expected = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, supplied)
+        if not hmac.compare_digest(expected, supplied):
+            return False
+        if consume:
+            init_gmail_db()
+            with _connect() as conn:
+                deleted = conn.execute("DELETE FROM gmail_oauth_states WHERE state_hash=? AND expires_at>=?", (hashlib.sha256(state.encode()).hexdigest(), int(datetime.now(timezone.utc).timestamp())))
+                return deleted.rowcount == 1
+        return True
     except (ValueError, TypeError):
         return False
 
@@ -193,6 +203,10 @@ async def exchange_code(code: str) -> dict[str, Any]:
         return {"ok": False, "error": "Google token exchange returned invalid JSON"}
     init_gmail_db()
     email = await _fetch_profile_email(data.get("access_token", ""))
+    from application_workflow import get_profile
+    expected_email = str(get_profile().get("email") or "").strip().lower()
+    if not email or not expected_email or not hmac.compare_digest(email.lower(), expected_email):
+        return {"ok": False, "error": "Connect the Gmail account matching your private profile email."}
     expiry = ""
     if data.get("expires_in"):
         expiry = datetime.fromtimestamp(

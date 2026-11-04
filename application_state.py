@@ -230,6 +230,8 @@ def transition(
         current = dict(row)
         from_state = current["state"]
         allowed = ALLOWED_TRANSITIONS.get(from_state, set())
+        if to_state == from_state and to_state == "submitting":
+            raise ValueError("submission already claimed")
         if to_state != from_state and to_state not in allowed:
             raise ValueError(f"illegal transition {from_state} -> {to_state}")
         if from_state in TERMINAL_SUCCESS and to_state != from_state:
@@ -244,11 +246,13 @@ def transition(
             params.append(reason[:1000])
         if to_state == "submitting":
             fields.append("attempt_count=attempt_count+1")
-        params.append(attempt_id)
-        conn.execute(
-            f"UPDATE application_attempts SET {', '.join(fields)} WHERE id=?",
+        params.extend([attempt_id, from_state])
+        updated = conn.execute(
+            f"UPDATE application_attempts SET {', '.join(fields)} WHERE id=? AND state=?",
             params,
         )
+        if updated.rowcount != 1:
+            raise ValueError("attempt changed concurrently; reload before retry")
         conn.execute(
             """
             INSERT INTO application_state_events

@@ -207,6 +207,9 @@ async def create_application_draft(job_id):
         if not job:
             return None
         job = dict(job)
+        existing = conn.execute("SELECT * FROM application_drafts WHERE job_id=?", (job_id,)).fetchone()
+        if existing and existing["status"] in {"applied_manually", "interview", "rejected", "offer", "withdrawn"}:
+            return _serialize_draft(existing, job)
         profile = get_profile_full()
         skills = profile.get("skills") or []
         keywords = _keywords(job.get("description") or "", job.get("title") or "", skills)
@@ -248,7 +251,7 @@ async def create_application_draft(job_id):
         conn.execute(
             """INSERT INTO application_drafts(job_id,status,tailored_headline,keyword_checklist,resume_guidance,cover_letter,created_at,updated_at)
             VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(job_id) DO UPDATE SET status='prepared', tailored_headline=excluded.tailored_headline,
+            ON CONFLICT(job_id) DO UPDATE SET tailored_headline=excluded.tailored_headline,
             keyword_checklist=excluded.keyword_checklist, resume_guidance=excluded.resume_guidance,
             cover_letter=excluded.cover_letter, updated_at=excluded.updated_at""",
             (job_id, title + " | " + headline, json.dumps(keywords), json.dumps(guidance), cover, now, now),
@@ -304,11 +307,13 @@ def update_draft_status(draft_id, status, note=""):
         raise ValueError("status must be one of " + ", ".join(sorted(allowed)))
     init_workflow_db()
     with _connect() as conn:
-        row = conn.execute("SELECT id FROM application_drafts WHERE id=?", (draft_id,)).fetchone()
+        row = conn.execute("SELECT id, job_id FROM application_drafts WHERE id=?", (draft_id,)).fetchone()
         if not row:
             return None
         now = _now()
         conn.execute("UPDATE application_drafts SET status=?, updated_at=? WHERE id=?", (status, now, draft_id))
+        job_status = {"prepared": "draft_ready", "ready_for_review": "draft_ready", "withdrawn": "not_relevant"}.get(status, status)
+        conn.execute("UPDATE jobs SET status=? WHERE id=?", (job_status, row["job_id"]))
         conn.execute(
             "INSERT INTO application_events(draft_id,event,note,created_at) VALUES (?,?,?,?)",
             (draft_id, status, note.strip()[:1000], now),

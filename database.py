@@ -168,7 +168,8 @@ def database_diagnostics():
     expected_tables = (
         "jobs", "hunt_runs", "settings", "candidate_profile",
         "application_drafts", "application_events", "gmail_tokens",
-        "gmail_seen_messages",
+        "gmail_seen_messages", "gmail_oauth_states", "automation_settings",
+        "application_attempts", "application_state_events",
     )
     mode = "postgresql" if postgres_enabled() else "sqlite"
     try:
@@ -207,3 +208,19 @@ def database_diagnostics():
             "expected_tables": len(expected_tables),
             "error_type": type(exc).__name__,
         }
+
+
+def initialize_database_schema():
+    """Apply bundled, additive PostgreSQL migrations under a transaction lock."""
+    if not postgres_enabled():
+        return
+    with connect() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(746821950)")
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+        for migration in sorted(Path(__file__).with_name("migrations").glob("*.sql")):
+            if conn.execute("SELECT version FROM schema_migrations WHERE version=?", (migration.name,)).fetchone():
+                continue
+            for statement in migration.read_text().split(";"):
+                if statement.strip():
+                    conn.execute(statement)
+            conn.execute("INSERT INTO schema_migrations(version) VALUES (?)", (migration.name,))

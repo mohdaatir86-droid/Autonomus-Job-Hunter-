@@ -1,4 +1,4 @@
-"""Personal WhatsApp push for high-match jobs.
+"""Email-first job digests, with explicit opt-in for legacy WhatsApp delivery.
 
 Options (first configured wins):
 1) CallMeBot — free personal: https://www.callmebot.com/blog/free-api-whatsapp-messages/
@@ -18,29 +18,52 @@ import httpx
 log = logging.getLogger("job-hunter")
 
 
-def notify_configured() -> bool:
+def _whatsapp_configured() -> bool:
     phone = os.getenv("WHATSAPP_PHONE", "").strip().lstrip("+")
     if not phone:
         return False
     if os.getenv("WHATSAPP_CALLMEBOT_APIKEY", "").strip():
         return True
-    if os.getenv("TWILIO_ACCOUNT_SID", "").strip() and os.getenv("TWILIO_AUTH_TOKEN", "").strip():
+    if os.getenv("TWILIO_ACCOUNT_SID", "").strip() and os.getenv("TWILIO_AUTH_TOKEN", "").strip() and os.getenv("TWILIO_WHATSAPP_FROM", "").strip():
         return True
     return False
 
 
+def notification_channel() -> str:
+    return os.getenv("ALERT_CHANNEL", "email").strip().lower()
+
+
+def notification_min_score() -> int:
+    try:
+        return max(0, min(100, int(os.getenv("ALERT_MIN_SCORE", os.getenv("WHATSAPP_MIN_SCORE", "70")))))
+    except ValueError:
+        return 70
+
+
+def notify_configured() -> bool:
+    if notification_channel() == "email":
+        from email_alerts import email_status
+        return email_status()["configured"]
+    return notification_channel() == "whatsapp" and _whatsapp_configured()
+
+
 def notify_status() -> dict[str, Any]:
-    return {
-        "configured": notify_configured(),
-        "phone_set": bool(os.getenv("WHATSAPP_PHONE", "").strip()),
-        "provider": (
-            "callmebot"
-            if os.getenv("WHATSAPP_CALLMEBOT_APIKEY", "").strip()
-            else ("twilio" if os.getenv("TWILIO_ACCOUNT_SID", "").strip() else None)
-        ),
-        "min_score": int(os.getenv("WHATSAPP_MIN_SCORE", "70")),
-        "hint": "CallMeBot is easiest for personal use. Set WHATSAPP_PHONE and WHATSAPP_CALLMEBOT_APIKEY.",
-    }
+    channel = notification_channel()
+    if channel == "email":
+        from email_alerts import email_status
+        return {**email_status(), "channel": "email", "min_score": notification_min_score()}
+    return {"configured": notify_configured(), "channel": channel,
+            "provider": ("callmebot" if os.getenv("WHATSAPP_CALLMEBOT_APIKEY", "").strip() else "twilio") if channel == "whatsapp" else None,
+            "min_score": notification_min_score(), "hint": "Email is the default. Set ALERT_CHANNEL=whatsapp only to opt into legacy WhatsApp delivery."}
+
+
+async def send_notification(text: str) -> dict[str, Any]:
+    if notification_channel() == "email":
+        from email_alerts import send_email
+        return await send_email(text)
+    if notification_channel() == "whatsapp":
+        return await send_whatsapp(text)
+    return {"sent": False, "error": "Unsupported ALERT_CHANNEL; select email or whatsapp"}
 
 
 async def send_whatsapp(text: str) -> dict[str, Any]:
@@ -86,7 +109,7 @@ async def send_whatsapp(text: str) -> dict[str, Any]:
 async def notify_high_match_jobs(jobs: list[dict], portal_base: str | None = None) -> dict[str, Any]:
     if not notify_configured() or not jobs:
         return {"sent": False, "skipped": True, "count": 0}
-    min_score = int(os.getenv("WHATSAPP_MIN_SCORE", "70"))
+    min_score = notification_min_score()
     hits = [j for j in jobs if int(j.get("match_score") or 0) >= min_score]
     if not hits:
         return {"sent": False, "skipped": True, "count": 0, "reason": "no jobs above min score"}
@@ -102,6 +125,6 @@ async def notify_high_match_jobs(jobs: list[dict], portal_base: str | None = Non
             lines.append(f"  {j['url']}")
     lines.append(f"Open portal: {base}")
     lines.append("Draft cover letter on portal, then apply yourself.")
-    result = await send_whatsapp("\n".join(lines))
+    result = await send_notification("\n".join(lines))
     result["count"] = len(hits)
     return result

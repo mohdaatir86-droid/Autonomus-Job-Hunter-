@@ -23,6 +23,9 @@ TABLES = (
     "application_events",
     "gmail_tokens",
     "gmail_seen_messages",
+    "automation_settings",
+    "application_attempts",
+    "application_state_events",
 )
 
 

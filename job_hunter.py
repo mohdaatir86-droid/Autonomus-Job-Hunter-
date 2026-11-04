@@ -9,10 +9,10 @@ from database import connect as db_connect, postgres_enabled
 
 log = logging.getLogger("job-hunter")
 DB_PATH = os.getenv("DATABASE_PATH", "job_hunter.db")
-DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Canada"]
+DEFAULT_COUNTRIES = ["India", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Bahrain"]
 DEFAULT_TITLES = [
-    "Senior Cluster Manager", "Cluster Manager", "City Operations Manager", "Program Manager",
-    "Operations Manager", "Head of Operations", "Regional Operations Manager",
+    "Operations Manager", "Cluster Manager", "Area Manager", "Senior Cluster Manager", "City Operations Manager", "Program Manager",
+    "Head of Operations", "Regional Operations Manager",
     "Warehouse Manager", "Fulfilment Manager", "Fulfillment Manager",
     "Dark Store Manager", "Supply Chain Manager", "Last Mile Operations Manager",
     "QSR Operations Manager", "Multi-Unit Operations Manager", "Area Operations Manager",
@@ -24,9 +24,92 @@ DEFAULT_SKILLS = [
     "store launch", "vendor management", "3pl", "process improvement", "qsr operations",
     "multi-unit management", "shrinkage control", "order fulfillment", "pre-launch readiness",
 ]
+INDIA_REGION_ALIASES = {'delhi ncr': ['delhi', 'ncr', 'noida', 'gurgaon', 'gurugram', 'ghaziabad', 'faridabad', 'manesar'],
+ 'uttar pradesh': ['uttar pradesh',
+                   'lucknow',
+                   'kanpur',
+                   'agra',
+                   'meerut',
+                   'varanasi',
+                   'prayagraj',
+                   'allahabad',
+                   'bareilly',
+                   'gorakhpur',
+                   'aligarh',
+                   'mathura',
+                   'moradabad',
+                   'saharanpur',
+                   'jhansi',
+                   'noida',
+                   'ghaziabad',
+                   'ayodhya',
+                   'firozabad',
+                   'muzaffarnagar',
+                   'rampur',
+                   'shahjahanpur',
+                   'ambedkar nagar',
+                   'amethi',
+                   'amroha',
+                   'auraiya',
+                   'azamgarh',
+                   'baghpat',
+                   'bahraich',
+                   'ballia',
+                   'balrampur',
+                   'banda',
+                   'barabanki',
+                   'basti',
+                   'bhadohi',
+                   'bijnor',
+                   'budaun',
+                   'bulandshahr',
+                   'chandauli',
+                   'chitrakoot',
+                   'deoria',
+                   'etah',
+                   'etawah',
+                   'farrukhabad',
+                   'fatehpur',
+                   'gautam buddha nagar',
+                   'ghazipur',
+                   'gonda',
+                   'hamirpur',
+                   'hapur',
+                   'hardoi',
+                   'hathras',
+                   'jalaun',
+                   'jaunpur',
+                   'kannauj',
+                   'kasganj',
+                   'kaushambi',
+                   'kushinagar',
+                   'lakhimpur',
+                   'lalitpur',
+                   'maharajganj',
+                   'mahoba',
+                   'mainpuri',
+                   'mau',
+                   'mirzapur',
+                   'pilibhit',
+                   'pratapgarh',
+                   'rae bareli',
+                   'raebareli',
+                   'sambhal',
+                   'sant kabir nagar',
+                   'shamli',
+                   'shravasti',
+                   'siddharthnagar',
+                   'sitapur',
+                   'sonbhadra',
+                   'sultanpur',
+                   'unnao',
+                   'faizabad'],
+ 'dehradun': ['dehradun', 'dehra dun']}
+
 DEFAULT_SETTINGS = {
     "target_countries": DEFAULT_COUNTRIES,
     "target_titles": DEFAULT_TITLES,
+    "preferred_locations": ["Delhi NCR", "Uttar Pradesh", "Dehradun"],
     "min_match_score": 45,
     "max_results_per_source": 100,
     "min_india_salary_lpa": 20,
@@ -54,29 +137,6 @@ def init_db():
                     "INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)",
                     (key, json.dumps(value)),
                 )
-            row = conn.execute("SELECT value FROM settings WHERE key='target_countries'").fetchone()
-            if row:
-                try:
-                    saved = json.loads(row["value"])
-                except (TypeError, json.JSONDecodeError):
-                    saved = []
-                if set(saved) != set(DEFAULT_COUNTRIES):
-                    conn.execute(
-                        "UPDATE settings SET value=? WHERE key='target_countries'",
-                        (json.dumps(DEFAULT_COUNTRIES),),
-                    )
-            title_row = conn.execute("SELECT value FROM settings WHERE key='target_titles'").fetchone()
-            if title_row:
-                try:
-                    saved_titles = json.loads(title_row["value"])
-                except (TypeError, json.JSONDecodeError):
-                    saved_titles = []
-                if "Program Manager" not in saved_titles:
-                    saved_titles.append("Program Manager")
-                    conn.execute(
-                        "UPDATE settings SET value=? WHERE key='target_titles'",
-                        (json.dumps(saved_titles),),
-                    )
         return
     with connect() as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS jobs (
@@ -96,29 +156,6 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         for key, value in DEFAULT_SETTINGS.items():
             conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)", (key, json.dumps(value)))
-        row = conn.execute("SELECT value FROM settings WHERE key='target_countries'").fetchone()
-        if row:
-            try:
-                saved = json.loads(row["value"])
-            except (TypeError, json.JSONDecodeError):
-                saved = []
-            if set(saved) != set(DEFAULT_COUNTRIES):
-                conn.execute(
-                    "UPDATE settings SET value=? WHERE key='target_countries'",
-                    (json.dumps(DEFAULT_COUNTRIES),),
-                )
-        title_row = conn.execute("SELECT value FROM settings WHERE key='target_titles'").fetchone()
-        if title_row:
-            try:
-                saved_titles = json.loads(title_row["value"])
-            except (TypeError, json.JSONDecodeError):
-                saved_titles = []
-            if "Program Manager" not in saved_titles:
-                saved_titles.append("Program Manager")
-                conn.execute(
-                    "UPDATE settings SET value=? WHERE key='target_titles'",
-                    (json.dumps(saved_titles),),
-                )
 
 
 def get_settings():
@@ -161,9 +198,10 @@ def detect_country(location, title="", description=""):
         ("Oman", ["oman", "muscat", "salalah"]),
         ("Canada", ["canada", "toronto", "vancouver", "montreal", "calgary", "ottawa", "edmonton"]),
         ("Bahrain", ["bahrain", "manama"]),
-        ("India", ["india", "new delhi", "delhi", "ncr", "gurugram", "gurgaon", "noida", "greater noida", "dehradun", "uttarakhand", "uttar pradesh", "chandigarh", "ghaziabad", "faridabad", "manesar", "mumbai", "bengaluru", "bangalore", "hyderabad", "pune", "chennai", "jaipur", "lucknow"]),
+        ("India", ["india", "new delhi", "delhi", "ncr", "gurugram", "gurgaon", "noida", "greater noida", "dehradun", "uttarakhand", "uttar pradesh", "chandigarh", "ghaziabad", "faridabad", "manesar", "mumbai", "bengaluru", "bangalore", "hyderabad", "pune", "chennai", "jaipur", "lucknow"] + [term for terms in INDIA_REGION_ALIASES.values() for term in terms]),
         ("United States", ["united states", "usa", "u.s.a.", "new york", "san francisco", "seattle", "austin"]),
         ("United Kingdom", ["united kingdom", "uk", "london", "manchester"]),
+        ("Bahrain", ["bahrain", "manama"]),
         ("Singapore", ["singapore"]),
         ("Germany", ["germany", "berlin", "munich"]),
         ("Australia", ["australia", "sydney", "melbourne"]),
@@ -186,7 +224,7 @@ def score_job(job, settings):
     text = " ".join([title, description])
     score, reasons = 0, []
     role_groups = [
-        (["senior cluster manager", "cluster manager", "city operations manager", "city manager", "area operations manager"], 42, "Cluster/city/area operations leadership"),
+        (["senior cluster manager", "cluster manager", "city operations manager", "city manager", "area operations manager", "area manager"], 42, "Cluster/city/area operations leadership"),
         (["head of operations", "director of operations", "regional operations manager", "regional operations"], 40, "Regional or head-of-operations leadership"),
         (["qsr operations", "multi-unit operations", "multi unit operations", "restaurant operations manager"], 38, "QSR / multi-unit operations leadership"),
         (["operations manager", "general manager operations", "operations head"], 34, "Operations management"),

@@ -21,6 +21,7 @@ from job_hunter import (
     detect_country,
     now_iso,
     DEFAULT_COUNTRIES,
+    INDIA_REGION_ALIASES,
 )
 
 log = logging.getLogger("job-hunter")
@@ -41,7 +42,7 @@ PORTAL_SOURCE_MATCHES = (
     ("gulfjobs", "GulfJobs", ("gulfjobs",), ("gulfjobs.com",)),
 )
 
-GULF_COUNTRIES = ["United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman"]
+GULF_COUNTRIES = ["United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Oman", "Bahrain"]
 LISTABLE_COUNTRIES = ["India"] + GULF_COUNTRIES + ["Canada"]
 
 INDIA_TARGET_LOCATION_TERMS = (
@@ -55,22 +56,22 @@ def is_target_market_job(job, country=None):
     market = country or detect_country(job.get("location"), job.get("title", ""), job.get("description", ""))
     return market in LISTABLE_COUNTRIES
 
-SERPAPI_QUERIES = [
-    "Cluster Manager India",
-    "Operations Manager QSR India",
-    "Dark Store Manager India",
-    "City Operations Manager India OR Noida OR Gurugram",
-    "Warehouse Manager OR Fulfilment Manager India",
-    "Regional Operations Manager India",
-    "Multi Unit Operations Manager India",
-    "Q-commerce OR quick commerce Operations Manager India",
-    "Cluster Manager UAE OR Dubai OR Riyadh OR Qatar",
-    "Operations Manager Gulf OR UAE OR Saudi Arabia",
-    "Operations Manager Qatar OR Kuwait OR Oman",
-    "Senior Cluster Manager Canada OR Toronto OR Vancouver",
-    "City Operations Manager Canada OR Toronto OR Calgary",
-    "Program Manager Operations Supply Chain Canada OR UAE OR Saudi Arabia",
-]
+def build_search_queries(settings):
+    roles = settings.get("target_titles", ["Operations Manager", "Cluster Manager", "Area Manager"])[:3]
+    countries = settings.get("target_countries", DEFAULT_COUNTRIES)
+    queries = []
+    if "India" in countries:
+        locations = settings.get("preferred_locations") or ["India"]
+        for role in roles:
+            queries.append(f"{role} (" + " OR ".join(locations) + ") India")
+    gulf = [country for country in countries if country in GULF_COUNTRIES]
+    if gulf:
+        for role in roles:
+            queries.append(role + " (" + " OR ".join(gulf) + ")")
+    for country in countries:
+        if country != "India" and country not in GULF_COUNTRIES:
+            queries.append(f"{roles[0]} {country}")
+    return queries
 
 
 def _parse_iso(value):
@@ -291,15 +292,15 @@ def normalize_job_url(url: str) -> str:
 
 def ensure_job_columns():
     init_db()
+    from database import postgres_enabled
     with connect() as conn:
-        try:
-            conn.execute("ALTER TABLE jobs ADD COLUMN normalized_url TEXT")
-        except Exception:
-            pass
-        try:
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_normalized_url ON jobs(normalized_url)")
-        except Exception:
-            pass
+        if postgres_enabled():
+            conn.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS normalized_url TEXT")
+        else:
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
+            if "normalized_url" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN normalized_url TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_normalized_url ON jobs(normalized_url)")
 
 
 def persist_source_report(reports, portal_counts=None):
@@ -366,9 +367,7 @@ async def fetch_serpapi_google_jobs(client, limit):
     if not api_key:
         return [], "SERPAPI_API_KEY not set"
     out, errors = [], []
-    # Balance scheduled searches across India and Gulf target markets.
-    # The old first-three slice only searched India, excluding Gulf roles.
-    queries = SERPAPI_QUERIES[:3] + SERPAPI_QUERIES[8:10] + SERPAPI_QUERIES[5:6]
+    queries = build_search_queries(get_settings())
     per_q = max(5, min(20, limit // max(1, len(queries))))
     for q in queries:
         try:
@@ -596,6 +595,34 @@ def _choose_url(existing_url, new_url):
     return old or new_url
 
 
+def matches_preferences(job, settings):
+    """Reject explicit mismatches; retain undisclosed requirements for review."""
+    country = job.get("country") or detect_country(job.get("location"))
+    if country == "India" and settings.get("preferred_locations"):
+        location = normalize_text(job.get("location")).lower()
+        groups = INDIA_REGION_ALIASES
+        terms = [term for place in settings["preferred_locations"] for term in groups.get(place.lower(), [place.lower()])]
+        # Country-only/remote locations cannot establish a city mismatch.
+        if location and location not in {"india", "remote", "remote, india", "india (remote)"} and not any(term in location for term in terms):
+            return False
+    text = normalize_text(" ".join(str(job.get(k) or "") for k in ("title", "description", "employment_type", "location"))).lower()
+    desired = settings.get("work_arrangement", "all")
+    actual = "hybrid" if "hybrid" in text else "remote" if re.search(r"\bremote\b|work from home", text) else "onsite" if re.search(r"on[ -]?site|in[ -]?office", text) else None
+    if desired != "all" and actual and desired != actual:
+        return False
+    if settings.get("visa_preference") == "sponsor" and re.search(r"no (?:visa )?sponsorship|(?:visa )?sponsorship (?:is )?not (?:available|provided|offered)|must (?:already )?have (?:the )?right to work", text):
+        return False
+    experience = re.search(r"(?:minimum |at least )?(\d+)(?:\s*[-–]\s*(\d+))?\+?\s*years?(?: of)? experience", text)
+    if experience and int(experience.group(2) or experience.group(1)) < int(settings.get("min_experience_years", 0)):
+        return False
+    if country == "India":
+        salary = normalize_text(job.get("salary")).lower().replace(",", "")
+        match = re.search(r"(\d+(?:\.\d+)?)(?:\s*[-–]\s*(\d+(?:\.\d+)?))?\s*(?:lpa|lakhs?(?: per annum)?|lacs?)\b", salary)
+        if match and float(match.group(2) or match.group(1)) < float(settings.get("min_india_salary_lpa", 0)):
+            return False
+    return True
+
+
 async def hunt_jobs():
     if _hunt_lock.locked():
         return {
@@ -622,6 +649,8 @@ async def _hunt_jobs_locked():
     inserted = updated = closed = 0
     sources_touched = set()
     notify_jobs = []
+    notification_now = datetime.now(timezone.utc)
+    notification_cutoff = (notification_now - timedelta(days=settings.get("posted_within_days", 3))).isoformat()
     full_board_urls = {}
     for job in fetched:
         if job.get("_board_complete"):
@@ -629,7 +658,7 @@ async def _hunt_jobs_locked():
     with connect() as conn:
         for job in fetched:
             score, reasons, country = score_job(job, settings)
-            if country not in LISTABLE_COUNTRIES or not is_target_market_job(job, country):
+            if country not in settings.get("target_countries", DEFAULT_COUNTRIES) or not is_target_market_job(job, country) or not matches_preferences({**job, "country": country}, settings):
                 continue
             sources_touched.add(job.get("source") or "?")
             normalized_url = normalize_job_url(job["url"])
@@ -671,8 +700,10 @@ async def _hunt_jobs_locked():
                     ),
                 )
                 inserted += 1
-                min_wa = int(os.getenv("WHATSAPP_MIN_SCORE", "70"))
-                if score >= min_wa:
+                from notify import notification_min_score
+                min_alert_score = notification_min_score()
+                posted_at = _parse_iso(job.get("posted_at"))
+                if score >= min_alert_score and posted_at and notification_cutoff <= posted_at <= notification_now.isoformat():
                     notify_jobs.append({
                         "title": job["title"], "company": job["company"], "location": job["location"],
                         "country": country, "url": job["url"], "match_score": score,
@@ -704,7 +735,7 @@ async def _hunt_jobs_locked():
         notify_result = await notify_high_match_jobs(notify_jobs)
     except Exception as e:
         summary = _safe_source_error(e)
-        log.warning("WhatsApp notify failed: %s", summary)
+        log.warning("Job notification failed: %s", summary)
         notify_result = {"sent": False, "error": summary}
     return {
         "status": "completed",
@@ -717,7 +748,7 @@ async def _hunt_jobs_locked():
         "sources": sorted(sources_touched),
         "source_report": reports,
         "errors": errors,
-        "whatsapp_notify": notify_result,
+        "notification": notify_result,
         "live_applications_enabled": False,
     }
 
@@ -732,21 +763,29 @@ def list_jobs(
     offset=0,
     q=None,
     source=None,
+    draft_candidates=False,
 ):
     init_db()
+    settings = get_settings()
+    tracked = status in {"saved", "shortlisted", "draft_ready", "applied_manually", "interview", "offer", "rejected", "not_relevant", "closed"}
     if country:
         allowed = [country]
     else:
-        allowed = LISTABLE_COUNTRIES
+        allowed = LISTABLE_COUNTRIES if tracked else settings["target_countries"]
     placeholders = ",".join("?" for _ in allowed)
     clauses = ["match_score >= ?", "country IN (" + placeholders + ")"]
     params: list[Any] = [min_score, *allowed]
+    if draft_candidates:
+        clauses.append("status IN ('new','saved','shortlisted')")
+        clauses.append("NOT EXISTS (SELECT 1 FROM application_drafts WHERE application_drafts.job_id=jobs.id)")
     if status:
         clauses.append("status = ?")
         params.append(status)
     if source:
         clauses.append("lower(source) LIKE ?")
         params.append("%" + source.strip().lower() + "%")
+    if posted_within_days is None:
+        posted_within_days = 0 if status in {"saved", "shortlisted", "draft_ready", "applied_manually", "interview", "offer", "rejected", "not_relevant", "closed"} else settings.get("posted_within_days", 3)
     if posted_within_days:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=int(posted_within_days))).isoformat()
         clauses.append("posted_at IS NOT NULL AND posted_at >= ?")
@@ -770,11 +809,19 @@ def list_jobs(
     sql = (
         "SELECT * FROM jobs WHERE "
         + " AND ".join(clauses)
-        + " ORDER BY match_score DESC, COALESCE(posted_at, first_seen_at) DESC LIMIT ? OFFSET ?"
+        + " ORDER BY match_score DESC, COALESCE(posted_at, first_seen_at) DESC"
     )
-    params.extend([limit, offset])
+    rows, eligible = [], 0
     with connect() as conn:
-        rows = [dict(row) for row in conn.execute(sql, params).fetchall()]
+        for record in conn.execute(sql, params):
+            row = dict(record)
+            if not tracked and not matches_preferences(row, settings):
+                continue
+            if eligible >= offset:
+                rows.append(row)
+            eligible += 1
+            if len(rows) >= limit:
+                break
     for row in rows:
         try:
             row["match_reasons"] = json.loads(row.get("match_reasons") or "[]")
@@ -786,56 +833,43 @@ def list_jobs(
 
 
 def get_stats():
-    init_db()
-    allowed = tuple(LISTABLE_COUNTRIES)
+    from collections import Counter
+    settings = get_settings()
+    allowed = settings["target_countries"]
     placeholders = ",".join("?" for _ in allowed)
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-    recent_where = "posted_at IS NOT NULL AND posted_at >= ? AND country IN (" + placeholders + ")"
-    recent_params = (cutoff, *allowed)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=settings.get("posted_within_days", 3))).isoformat()
+    countries, sources = Counter(), Counter()
+    total = new_count = high = 0
     with connect() as conn:
-        total = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE " + recent_where, recent_params
-        ).fetchone()[0]
-        new_count = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE status='new' AND " + recent_where, recent_params
-        ).fetchone()[0]
-        high = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE match_score >= 65 AND " + recent_where, recent_params
-        ).fetchone()[0]
+        for record in conn.execute("SELECT * FROM jobs WHERE posted_at>=? AND country IN (" + placeholders + ")", (cutoff, *allowed)):
+            job = dict(record)
+            if not matches_preferences(job, settings):
+                continue
+            total += 1
+            new_count += job["status"] == "new"
+            high += job["match_score"] >= 65
+            countries[job["country"]] += 1
+            sources[job["source"]] += 1
         last = conn.execute("SELECT * FROM hunt_runs ORDER BY id DESC LIMIT 1").fetchone()
-        by_country = [
-            dict(row)
-            for row in conn.execute(
-                "SELECT country, COUNT(*) AS count FROM jobs WHERE "
-                + recent_where
-                + " GROUP BY country ORDER BY count DESC",
-                recent_params,
-            ).fetchall()
-        ]
-        by_source = [
-            dict(row)
-            for row in conn.execute(
-                "SELECT source, COUNT(*) AS count FROM jobs WHERE "
-                + recent_where
-                + " GROUP BY source ORDER BY count DESC",
-                recent_params,
-            ).fetchall()
-        ]
     return {
-        "total_jobs": total,
-        "new_jobs": new_count,
-        "high_match_jobs": high,
+        "total_jobs": total, "new_jobs": new_count, "high_match_jobs": high,
         "last_run": dict(last) if last else None,
-        "by_country": by_country,
-        "by_source": by_source,
+        "by_country": [{"country": name, "count": count} for name, count in countries.most_common()],
+        "by_source": [{"source": name, "count": count} for name, count in sources.most_common()],
+        "posted_within_days": settings.get("posted_within_days", 3),
         "live_applications_enabled": False,
     }
 
 
 def set_job_status(job_id, status):
     init_db()
+    from application_workflow import init_workflow_db
+    init_workflow_db()
     with connect() as conn:
         cur = conn.execute("UPDATE jobs SET status=? WHERE id=?", (status, job_id))
         if cur.rowcount == 0:
             return {"updated": False, "error": "job not found"}
+        draft_status = {"draft_ready": "prepared", "applied_manually": "applied_manually", "interview": "interview", "rejected": "rejected", "offer": "offer", "not_relevant": "withdrawn", "closed": "withdrawn"}.get(status)
+        if draft_status:
+            conn.execute("UPDATE application_drafts SET status=?, updated_at=? WHERE job_id=?", (draft_status, now_iso(), job_id))
     return {"updated": True, "id": job_id, "status": status}
