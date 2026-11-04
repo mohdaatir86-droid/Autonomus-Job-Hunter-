@@ -4,6 +4,8 @@ A deployable MVP for discovering and scoring **operations leadership** vacancies
 
 This repository is intentionally independent of Product Hunter.
 
+See [the recruiter outreach and frontend guide](OUTREACH.md) for Apollo and Gmail sending.
+
 See [the operating runbook](RUNBOOK.md) for secure setup, email alerts, scheduling, database migrations and deployment checks.
 
 ## Target profile (current defaults)

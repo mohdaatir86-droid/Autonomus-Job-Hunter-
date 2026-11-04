@@ -30,5 +30,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest
-      - run: python -m compileall -q main.py job_hunter.py job_sources.py application_workflow.py gmail_alerts.py email_alerts.py ai_assist.py notify.py
+      - run: python -m compileall -q main.py job_hunter.py job_sources.py application_workflow.py gmail_alerts.py outreach.py outreach_routes.py email_alerts.py ai_assist.py notify.py
       - run: python -m pytest -q
+      - run: node --check static/app.js
+      - run: python -m playwright install --with-deps chromium
+      - run: python tests/browser_smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-fixture-evidence
+          path: /tmp/job-hunter-browser-evidence
+          if-no-files-found: ignore

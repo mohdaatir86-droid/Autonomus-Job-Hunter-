@@ -1,0 +1,1 @@
+ALTER TABLE gmail_tokens ADD COLUMN IF NOT EXISTS granted_scopes TEXT NOT NULL DEFAULT '';

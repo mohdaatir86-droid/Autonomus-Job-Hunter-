@@ -89,3 +89,7 @@ This imports read-only job-alert emails from the chosen Gmail account. Outgoing 
 6. Create operations/cluster/area-manager alerts on relevant job boards and have them delivered to that Gmail inbox. Run a hunt to import emails. Unknown posting dates are excluded from recent matches; connecting Gmail does not guarantee every message contains a usable dated vacancy.
 
 An OAuth client cannot be created or consented to using the Resend key. The Google account owner must perform Google's account/project and consent steps. Render credentials and Google OAuth client credentials are separate.
+
+## New workspace and recruiter outreach
+
+See [OUTREACH.md](OUTREACH.md) for the redesigned frontend, Apollo integration, Gmail sending permission and approval/queue controls. These are separate from self-alert emails and read-only job-alert ingestion.

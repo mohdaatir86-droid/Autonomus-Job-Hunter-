@@ -69,6 +69,10 @@ def init_gmail_db():
             email TEXT DEFAULT '', updated_at TEXT NOT NULL
         )"""
         )
+        if not postgres_enabled():
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(gmail_tokens)")}
+            if "granted_scopes" not in columns:
+                conn.execute("ALTER TABLE gmail_tokens ADD COLUMN granted_scopes TEXT NOT NULL DEFAULT ''")
         conn.execute(
             """CREATE TABLE IF NOT EXISTS gmail_seen_messages (
             message_id TEXT PRIMARY KEY, seen_at TEXT NOT NULL
@@ -83,7 +87,7 @@ def gmail_configured() -> bool:
 def get_gmail_status() -> dict[str, Any]:
     init_gmail_db()
     with _connect() as conn:
-        row = conn.execute("SELECT email, token_expiry, refresh_token FROM gmail_tokens WHERE id=1").fetchone()
+        row = conn.execute("SELECT email, token_expiry, refresh_token, granted_scopes FROM gmail_tokens WHERE id=1").fetchone()
     connected = bool(row and (row["refresh_token"] or row["email"]))
     missing = []
     if not os.getenv("GOOGLE_CLIENT_ID", "").strip():
@@ -103,6 +107,7 @@ def get_gmail_status() -> dict[str, Any]:
     elif connected:
         hint = "Connected. New job-alert emails are imported on the next hunt and are not imported twice."
     return {
+        "send_authorized": bool(row and "https://www.googleapis.com/auth/gmail.send" in (row["granted_scopes"] or "").split()),
         "oauth_configured": gmail_configured(),
         "connected": connected,
         "email": (row["email"] if row else "") or "",
@@ -124,7 +129,7 @@ def _oauth_state_secret() -> str:
     return (os.getenv("OAUTH_STATE_SECRET") or os.getenv("PORTAL_ACCESS_TOKEN") or "").strip()
 
 
-def build_auth_url(state: str | None = None) -> str:
+def build_auth_url(state: str | None = None, *, allow_send: bool = False) -> str:
     if not gmail_configured():
         raise ValueError("Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in environment")
     secret = _oauth_state_secret()
@@ -143,7 +148,7 @@ def build_auth_url(state: str | None = None) -> str:
         "client_id": os.getenv("GOOGLE_CLIENT_ID").strip(),
         "redirect_uri": _redirect_uri(),
         "response_type": "code",
-        "scope": "https://www.googleapis.com/auth/gmail.readonly",
+        "scope": "https://www.googleapis.com/auth/gmail.readonly" + (" https://www.googleapis.com/auth/gmail.send" if allow_send else ""),
         "access_type": "offline",
         "prompt": "consent",
         "state": signed_state,
@@ -215,15 +220,16 @@ async def exchange_code(code: str) -> dict[str, Any]:
         ).isoformat()
     with _connect() as conn:
         conn.execute(
-            """INSERT INTO gmail_tokens(id, access_token, refresh_token, token_expiry, email, updated_at)
-               VALUES (1,?,?,?,?,?)
+            """INSERT INTO gmail_tokens(id, access_token, refresh_token, token_expiry, email, updated_at, granted_scopes)
+               VALUES (1,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET
                  access_token=excluded.access_token,
                  refresh_token=COALESCE(excluded.refresh_token, gmail_tokens.refresh_token),
                  token_expiry=excluded.token_expiry,
                  email=excluded.email,
+                 granted_scopes=excluded.granted_scopes,
                  updated_at=excluded.updated_at""",
-            (data.get("access_token"), data.get("refresh_token"), expiry, email, _now()),
+            (data.get("access_token"), data.get("refresh_token"), expiry, email, _now(), str(data.get("scope") or "")),
         )
     return {"ok": True, "connected": True, "email": email}
 

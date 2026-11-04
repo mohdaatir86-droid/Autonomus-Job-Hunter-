@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from job_hunter import get_settings, save_settings, init_db
@@ -26,6 +27,8 @@ from automation_settings import init_automation_settings, get_automation_setting
 from browser_worker import run_application_worker, browser_health_check
 from automation_routes import router as automation_router
 from application_state import init_application_state_db
+from outreach_routes import router as outreach_router
+from outreach import init_outreach_db, dispatch_approved
 
 from application_workflow import (
     init_workflow_db,
@@ -147,6 +150,7 @@ async def lifespan(app: FastAPI):
     init_gmail_db()
     init_automation_settings()
     init_application_state_db()
+    init_outreach_db()
     if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -229,6 +233,7 @@ async def lifespan(app: FastAPI):
                 max_instances=1,
                 coalesce=True,
             )
+            scheduler.add_job(dispatch_approved,"interval",minutes=1,id="approved-outreach",replace_existing=True,max_instances=1,coalesce=True)
             scheduler.start()
             app.state.scheduler = scheduler
             log.info("Job discovery scheduler started; interval=%s minutes", minutes)
@@ -246,7 +251,9 @@ app = FastAPI(
     description="Job Hunter: discovery, drafts, guarded Greenhouse/Lever browser apply (opt-in). Authenticated boards discovery-only.",
     lifespan=lifespan,
 )
+app.mount("/static", StaticFiles(directory=Path(__file__).with_name("static")), name="static")
 app.include_router(automation_router)
+app.include_router(outreach_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -280,6 +287,7 @@ async def protect_private_candidate_data(request, call_next):
         or path == "/api/gmail/auth"
         or path == "/api/gmail/status"
         or path == "/api/setup"
+        or path.startswith("/api/outreach")
         or path == "/health/browser"
         or path == "/api/profile"
         or path.startswith("/api/profile/")
@@ -754,10 +762,19 @@ def gmail_status():
 
 @app.post("/api/gmail/auth")
 def gmail_auth(request: Request):
+    return _gmail_connect_response(request)
+
+
+@app.post("/api/outreach/gmail/connect")
+def outreach_gmail_connect(request: Request):
+    return _gmail_connect_response(request, allow_send=True)
+
+
+def _gmail_connect_response(request: Request, *, allow_send: bool = False):
     if not (get_profile().get("email") or "").strip():
         raise HTTPException(status_code=409, detail="Save your profile email before connecting Gmail.")
     try:
-        url = build_auth_url()
+        url = build_auth_url(allow_send=True) if allow_send else build_auth_url()
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     state = parse_qs(urlparse(url).query)["state"][0]

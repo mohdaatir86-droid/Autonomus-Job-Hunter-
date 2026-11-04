@@ -1,0 +1,28 @@
+"""Fixture-only browser app. All email, Apollo and discovery calls are mocked."""
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+import httpx
+import main,job_sources,job_hunter,notify,gmail_alerts,outreach
+async def sources(settings):
+    rows=[]
+    for i,title in enumerate(['Operations Manager','Senior Cluster Manager','Area Manager']):
+        rows.append(job_sources._clean_job({'id':str(i),'title':title,'company':'Example Logistics','location':'Noida, India','url':f'https://example.com/jobs/{i}','description':'Dark store warehouse operations inventory SLA KPI last mile delivery team leadership','date':job_hunter.now_iso()},'Fixture public board'))
+    return rows,[],[{'name':'Fixture public board','status':'working','fetched':3}],{}
+async def skip_notify(jobs):return {'sent':False,'skipped':True}
+def gmail_status():return {'connected':True,'oauth_configured':True,'send_authorized':True,'email':'candidate@example.com','missing':[],'hint':'Fixture connection'}
+async def token():return 'fixture-token'
+async def apollo(path,params):
+    if path.endswith('api_search'):return {'people':[{'id':'fixture-person','name':'Recruiter Fixture','title':'Talent Acquisition','organization':{'name':'Example Logistics'}}]}
+    return {'person':{'id':'fixture-person','name':'Recruiter Fixture','email':'recruiter@example.com','email_status':'verified','title':'Talent Acquisition','linkedin_url':'https://linkedin.com/in/fixture','organization':{'name':'Example Logistics'}}}
+async def post(self,url,**kwargs):
+    if url.endswith('/messages/send'):return httpx.Response(200,json={'id':'fixture-gmail-message'})
+    return httpx.Response(503,json={})
+job_sources.fetch_public_sources=sources
+notify.notify_high_match_jobs=skip_notify
+main.get_gmail_status=gmail_status
+gmail_alerts.get_gmail_status=gmail_status
+gmail_alerts._access_token=token
+outreach._apollo=apollo
+httpx.AsyncClient.post=post
+app=main.app
