@@ -8,3 +8,38 @@
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 /* Keep primary reading surfaces comfortable at desktop sizes. */
 @media(min-width:601px){.job-title{font-size:14px}.job-company{font-size:12px}.match-reason{font-size:10px}.location-name{font-size:12px}.source-label{font-size:11px}.status-select{font-size:11px}.panel-sub{font-size:12px}.stat-label{font-size:12px}.stat-note{font-size:10px}.workspace-header p{font-size:13px}.filter-field{font-size:11px}.filter-field select{font-size:12px}.tab{font-size:12px}.row-actions .btn{font-size:10px}}
+
+
+/* Career OS visual system — additive styling, preserving existing feature contracts */
+:root{--bg:#f3f6fb;--surface:#fff;--surface-soft:#f8faff;--border:#e4ebf3;--border-strong:#cfd9e8;--ink:#15243b;--text-secondary:#63748b;--muted:#748499;--primary:#325ad4;--primary-deep:#2548b5;--primary-soft:#edf3ff;--radius:18px;--shadow:0 6px 28px rgba(25,49,91,.045);--font:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{background:radial-gradient(ellipse 900px 380px at 80% -200px,#dceaff 0,transparent 75%),var(--bg)}
+.app-shell{grid-template-columns:254px minmax(0,1fr)}
+.sidebar{background:linear-gradient(165deg,#101d35,#0a1324 75%);border-right:1px solid rgba(255,255,255,.08);padding:30px 17px 24px}
+.brand{font-size:21px;padding:2px 13px 32px;letter-spacing:-.8px}.brand small{font-size:9px;color:#8297b8;letter-spacing:1.4px}
+.brand-mark{width:42px;height:42px;border-radius:13px;background:linear-gradient(145deg,#5381ff,#3156cd);box-shadow:0 9px 22px rgba(53,94,208,.38)}
+.nav-caption{font-size:10px;color:#7992b2;letter-spacing:1.6px}.workspace-nav{gap:7px}
+.tab{font-size:13px;min-height:45px;border-radius:11px;padding:12px 14px;color:#a9b9d1}
+.tab:hover{background:#1b2c48}.tab.active{background:linear-gradient(90deg,#29446f,#1b3459);color:#fff;box-shadow:inset 3px 0 #82adff}
+.nav-icon{color:#9cb3d6}.active .nav-icon{color:#d2e1ff}.sidebar-note{border-top:1px solid #283954;padding-top:22px}
+.main-content{max-width:1770px;padding:24px 36px 36px}
+.command-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px;padding:3px 0 14px;border-bottom:1px solid #e5eaf4}
+.command-left,.command-right{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+.command-eyebrow{font-size:10px;letter-spacing:1.6px;font-weight:800;color:#7488a8}.command-separator{color:#bdc7d5}.command-current{font-weight:700;color:#425777;font-size:12px}
+.command-health{display:flex;align-items:center;gap:7px;color:#55718d;font-size:11px;font-weight:650}.command-health-dot{width:7px;height:7px;border-radius:50%;background:#34a987;box-shadow:0 0 0 4px #e1f5ec}
+.command-shortcut{background:#fff;border:1px solid #e4eaf2;border-radius:9px;color:#536a89;padding:7px 11px;font-size:11px;font-weight:700}
+.command-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;background:linear-gradient(110deg,#132b53,#0f1f3c 64%,#203f72);border:1px solid #1c3b66;color:#fff;border-radius:22px;padding:27px 32px;margin-bottom:26px;box-shadow:0 18px 35px rgba(24,54,101,.13)}
+.hero-tag{font-size:10px;letter-spacing:1.5px;font-weight:800;color:#abc3ea;margin-bottom:10px}.hero-star{font-size:16px;color:#a8c9ff;margin-right:7px}
+.command-hero h2{font-size:clamp(24px,2.4vw,35px);letter-spacing:-1.15px;line-height:1.15;margin:0 0 10px;font-weight:800}.command-hero h2 em{color:#9ac5ff;font-style:normal}
+.command-hero p{color:#b4c5dd;font-size:12px;margin:0 0 14px;max-width:560px;line-height:1.7}.hero-pills{display:flex;gap:9px;flex-wrap:wrap}.hero-pills span{border:1px solid rgba(180,208,249,.22);background:rgba(255,255,255,.06);color:#c1d4ef;border-radius:20px;padding:5px 11px;font-size:10px}
+.hero-action{display:flex;flex-direction:column;gap:9px;align-items:stretch;min-width:176px}.hero-action .btn{width:100%;font-size:12px;min-height:42px}.hero-action .btn-secondary{background:transparent;color:#e0ecff;border-color:#58759c}.hero-action .btn-secondary:hover{background:#29456d}
+.workspace-header{margin-bottom:22px}.workspace-header h1{font-size:27px;font-weight:790;letter-spacing:-.9px}.breadcrumb{font-size:11px;color:#7e90a9}
+.btn{border-radius:10px;font-size:12px}.btn-primary{background:linear-gradient(135deg,#416bed,#3157d1);border-color:#3157d1;box-shadow:0 5px 12px #3157d121}.btn-primary:hover:not(:disabled){background:#284ab7}
+.stat-card{border-radius:17px;padding:21px 23px;border:1px solid #e4ebf4;box-shadow:0 6px 24px #1d396c08}.stat-label{font-size:12px;color:#73839b}.stat-value{font-size:34px}.stat-note{font-size:11px}
+.panel{border-radius:18px;border-color:#e2e9f2;box-shadow:0 6px 24px #1d396c08}.panel-title{font-size:16px}
+.jobs-table tbody tr:hover{background:#f7faff}.job-title{font-size:13px;color:#203653}.job-company{font-size:11px}.match-reason{font-size:10px}
+input,textarea,select{border-radius:10px}.search-box{border-radius:12px}.chip{border-radius:9px}.chip.active{background:#eaf1ff;color:#2854bc}
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #8cb4ff;outline-offset:3px}
+@media(max-width:1100px){.command-hero{align-items:flex-start}.hero-action{min-width:155px}}
+@media(max-width:900px){.app-shell{display:block}.sidebar{padding:13px 18px 10px}.main-content{padding:22px 20px}.command-bar{margin-bottom:15px}.command-hero{padding:25px}.tab{min-height:38px;font-size:11px;padding:8px 11px}.command-hero h2{font-size:27px}}
+@media(max-width:600px){.main-content{padding:18px 13px 28px}.sidebar{padding:11px 12px 8px}.command-bar{gap:7px}.command-eyebrow{font-size:8px}.command-current{font-size:10px}.command-health{font-size:10px}.command-shortcut{display:none}.command-hero{padding:22px 19px;border-radius:17px;flex-direction:column;gap:18px;margin-bottom:21px}.command-hero h2{font-size:27px}.command-hero p{font-size:11px}.hero-pills{gap:6px}.hero-pills span{font-size:9px;padding:4px 8px}.hero-action{width:100%;flex-direction:row}.hero-action .btn{min-width:0;white-space:normal;font-size:10px;min-height:40px}.workspace-header h1{font-size:24px}.stat-card{padding:16px}.stat-value{font-size:29px}.stat-label{font-size:11px}.stat-note{font-size:10px}.panel-title{font-size:15px}.tab{font-size:11px}}
+@media(prefers-reduced-motion:reduce){.command-hero,.stat-card,.panel{transition:none}}
