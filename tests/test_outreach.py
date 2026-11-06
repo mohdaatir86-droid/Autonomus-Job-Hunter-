@@ -137,7 +137,7 @@ def test_apollo_search_and_explicit_credit_enrichment(client,monkeypatch):
     assert calls[1][1]['json']['reveal_phone_number'] is False
     assert calls[1][1]['json']['id'] == 'apollo-fixture'
     assert 'params' not in calls[1][1]
-    assert calls[1][1]['params']['reveal_phone_number'] is False
+    assert calls[1][1]['json']['reveal_phone_number'] is False
 
 
 def test_gmail_sending_requires_separate_scope_consent(client):
