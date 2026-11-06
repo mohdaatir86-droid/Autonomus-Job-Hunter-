@@ -121,7 +121,7 @@ def get_gmail_status() -> dict[str, Any]:
 def _redirect_uri() -> str:
     return os.getenv(
         "GOOGLE_REDIRECT_URI",
-        "https://autonomous-job-hunter-docker.onrender.com/api/gmail/callback",
+        "https://autonomous-job-hunter-ui.vercel.app/api/gmail/callback",
     ).strip()
 
 
