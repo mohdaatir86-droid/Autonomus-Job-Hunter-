@@ -133,7 +133,10 @@ def test_apollo_search_and_explicit_credit_enrichment(client,monkeypatch):
     assert r.json()['verified'] is False
     assert r.json()['email_status']=='verified'
     assert len(calls)==2
-    assert calls[1][1]['params']['reveal_personal_emails'] is False
+    assert calls[1][1]['json']['reveal_personal_emails'] is False
+    assert calls[1][1]['json']['reveal_phone_number'] is False
+    assert calls[1][1]['json']['id'] == 'apollo-fixture'
+    assert 'params' not in calls[1][1]
     assert calls[1][1]['params']['reveal_phone_number'] is False
 
 
