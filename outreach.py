@@ -334,7 +334,7 @@ async def _apollo(path,params):
         raise HTTPException(503,'Add APOLLO_API_KEY securely in Render. Search requires an eligible Apollo API key.')
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post('https://api.apollo.io/api/v1/'+path,headers={'X-Api-Key':key,'Content-Type':'application/json'},json=params)
+            response = await client.post('https://api.apollo.io/api/v1/'+path,headers={'X-Api-Key':key,'Content-Type':'application/json'},**({'json':params} if path=='mixed_people/api_search' else {'params':params}))
         if response.status_code>=400:
             raise HTTPException(502,f'Apollo HTTP {response.status_code}; check API-key permissions, account eligibility and credits.')
         result = response.json()
