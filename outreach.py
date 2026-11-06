@@ -334,7 +334,7 @@ async def _apollo(path,params):
         raise HTTPException(503,'Add APOLLO_API_KEY securely in Render. Search requires an eligible Apollo API key.')
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post('https://api.apollo.io/api/v1/'+path,headers={'X-Api-Key':key,'Content-Type':'application/json'},params=params)
+            response = await client.post('https://api.apollo.io/api/v1/'+path,headers={'X-Api-Key':key,'Content-Type':'application/json'},**({'json':params} if path=='mixed_people/api_search' else {'params':params}))
         if response.status_code>=400:
             raise HTTPException(502,f'Apollo HTTP {response.status_code}; check API-key permissions, account eligibility and credits.')
         result = response.json()
@@ -348,9 +348,12 @@ async def search_apollo(payload):
     domain = str(payload.get('company_domain') or '').strip().lower()
     if not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}',domain) or len(domain)>253 or domain in {'gmail.com','yahoo.com','outlook.com'}:
         raise HTTPException(422,'Enter the employer company domain, for example meesho.com.')
-    params = [('q_organization_domains_list[]',domain),('contact_email_status[]','verified'),('page',1),('per_page',10)]
-    for title in ['Recruiter','Talent Acquisition','HR Manager','Human Resources Manager']:
-        params.append(('person_titles[]',title))
+    params = {
+        'q_organization_domains_list': [domain],
+        'person_titles': ['Recruiter','Talent Acquisition','HR Manager','Human Resources Manager'],
+        'page': 1,
+        'per_page': 10,
+    }
     data = await _apollo('mixed_people/api_search',params)
     items=[]
     for person in (data.get('people') or [])[:10]:
