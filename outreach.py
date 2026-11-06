@@ -372,6 +372,8 @@ async def enrich_apollo(payload):
             return _serialize(cached)
     data = await _apollo('people/match',{'id':identifier,'reveal_personal_emails':False,'reveal_phone_number':False})
     person = data.get('person') or {}
+    if str(person.get('email_status') or '').strip().lower() != 'verified':
+        raise HTTPException(422,'Apollo has not verified this work email. No unverified address will be saved.')
     if not person.get('email'):
         raise HTTPException(422,'Apollo did not return a work email. No address will be guessed.')
     return create_contact({'email':person['email'],'name':person.get('name') or person.get('first_name'),'title':person.get('title'),'company':(person.get('organization') or {}).get('name'),'source_url':person.get('linkedin_url') or 'https://app.apollo.io/#/people/'+identifier,'apollo_id':identifier,'email_status':person.get('email_status') or 'unverified'})
