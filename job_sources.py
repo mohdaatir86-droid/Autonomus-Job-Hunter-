@@ -421,7 +421,9 @@ async def fetch_serpapi_google_jobs(client, limit):
             summary = _safe_source_error(e)
             log.warning("SerpApi query failed (%s): %s", q[:40], summary)
             errors.append(f"SerpApi[{q[:40]}]: {summary}")
-            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (401, 403):
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (401, 403, 429):
+                # Rate limits apply to the key, not this query: avoid wasting
+                # quota and flooding the provider with subsequent requests.
                 break
     if not out and errors and status_from_error_text("; ".join(errors)) == "unauthorized":
         return out, "SerpApi unauthorized: HTTP 401. Rotate SERPAPI_API_KEY in Render; do not paste it into chat."
