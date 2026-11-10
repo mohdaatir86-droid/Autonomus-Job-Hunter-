@@ -192,3 +192,24 @@ def test_health_and_db(monkeypatch, tmp_path):
         assert settings.status_code == 200
         assert settings.json()["target_countries"] == job_hunter.DEFAULT_COUNTRIES
         assert "Program Manager" in settings.json()["target_titles"]
+
+
+def test_serpapi_stops_after_first_rate_limit(monkeypatch):
+    import httpx
+
+    calls = []
+
+    async def limited(*args, **kwargs):
+        calls.append(kwargs.get("params", {}).get("q"))
+        request = httpx.Request("GET", "https://serpapi.com/search.json")
+        response = httpx.Response(429, request=request)
+        raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+
+    monkeypatch.setenv("SERPAPI_API_KEY", "test-only-key")
+    monkeypatch.setattr(job_sources, "_get_json", limited)
+    monkeypatch.setattr(job_sources, "build_search_queries", lambda settings: ["query one", "query two"])
+    monkeypatch.setattr(job_sources, "get_settings", lambda: {})
+    jobs, error = asyncio.run(job_sources.fetch_serpapi_google_jobs(None, 20))
+    assert jobs == []
+    assert len(calls) == 1
+    assert "429" in error
