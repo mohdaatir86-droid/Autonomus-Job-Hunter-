@@ -99,3 +99,43 @@ document.querySelectorAll('.table-wrap tbody').forEach(body=>new MutationObserve
 
 async function loadMarketSummary(){try{const settings=await api('/api/settings'),countries=settings.target_countries||[],gulf=['United Arab Emirates','Saudi Arabia','Qatar','Kuwait','Oman','Bahrain'];let places=countries.includes('India')?(settings.preferred_locations||[]).map(x=>x==='Uttar Pradesh'?'UP':x):[];if(countries.includes('India')&&!places.length)places.push('India');if(gulf.every(x=>countries.includes(x)))places.push('Gulf');else places.push(...countries.filter(x=>gulf.includes(x)));places.push(...countries.filter(x=>x!=='India'&&!gulf.includes(x)));document.getElementById('targetRegionSummary').textContent=places.join(' · ')||'Choose your target markets'}catch(e){document.getElementById('targetRegionSummary').textContent='Target markets unavailable'}}
 async function copyApplicationDraft(){try{await navigator.clipboard.writeText(document.getElementById('draftBody').textContent);toast('Draft copied. Review it before using it.','success')}catch(e){toast('Copy was unavailable. Select the draft text to copy it manually.','error')}}
+
+
+/* Operational readiness: live backend truth, no invented application counts. */
+async function loadReadiness(){
+  const target=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v};
+  try{
+    const data=await api('/api/operational-readiness');
+    const last=data.last_hunt||{};
+    const found=Number(data.jobs_in_current_window||0);
+    target('missionDiscovery',found+' matching jobs');
+    target('missionDiscoveryNote',last.finished_at?'Last hunt '+ago(last.finished_at)+' · '+Number(last.fetched||0)+' fetched':'Run a hunt to begin');
+    target('missionResume',data.resume_uploaded?'Resume ready':'Resume needed');
+    target('missionResumeNote',data.resume_uploaded?'PDF uploaded in your profile':'Upload your latest PDF');
+    target('missionApply',data.automatic_submission_enabled?'Auto-submit enabled':'Drafts only');
+    target('missionApplyNote',data.automatic_submission_enabled?'Check confirmed application outcomes':'No automatic form submissions');
+    target('missionGmail',data.gmail_connected?'Connected':'Not connected');
+    target('missionGmailNote',data.gmail_connected?'Job-alert integration connected':'Connect to read job alerts');
+    const blockers=Array.isArray(data.blockers)?data.blockers:[];
+    const lastErrors=last.errors;
+    let errorCount=0;
+    try{const e=typeof lastErrors==='string'?JSON.parse(lastErrors):lastErrors;if(Array.isArray(e))errorCount=e.length}catch(_){}
+    let priority=blockers.find(x=>!/submission/i.test(x));
+    if(!priority&&!data.gmail_connected)priority='Connect Gmail job alerts to expand discovery coverage.';
+    if(!priority&&found===0)priority='No matching recent jobs. Check source health and widen filters.';
+    if(!priority&&errorCount)priority=errorCount+' source issue(s) in the latest hunt. Check Connections.';
+    if(!priority)priority='Review matching roles and prepare accurate application drafts.';
+    target('missionAction',priority);
+    target('missionTimestamp',last.finished_at?'Last backend run · '+ago(last.finished_at):'Awaiting first hunt');
+  }catch(err){
+    target('missionDiscovery','Unavailable');
+    target('missionDiscoveryNote','Could not reach backend');
+    target('missionResume','Unknown');
+    target('missionApply','Unknown');
+    target('missionGmail','Unknown');
+    target('missionAction','Backend status could not be verified. Check the API and try again.');
+    target('missionTimestamp','Connection check failed');
+  }
+}
+loadReadiness();
+setInterval(loadReadiness,180000);
