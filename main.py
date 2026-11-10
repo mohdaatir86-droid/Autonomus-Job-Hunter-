@@ -356,7 +356,7 @@ def health():
         "application_preparation_enabled": True,
         "resume_profile_configured": get_profile().get("has_resume", False),
         "browser_worker_enabled": os.getenv("BROWSER_WORKER_ENABLED", "false").lower() == "true",
-        "gmail": get_gmail_status(),
+        "gmail": {"oauth_configured": get_gmail_status().get("oauth_configured", False), "connected": get_gmail_status().get("connected", False)},
         "ai": ai_status(),
         "notifications": notify_status(),
     }
