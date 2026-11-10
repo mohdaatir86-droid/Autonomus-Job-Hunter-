@@ -460,6 +460,35 @@ def stats():
     return get_stats()
 
 
+@app.get("/api/operational-readiness")
+def operational_readiness():
+    """Report actual automation readiness without implying a successful application."""
+    from job_sources import get_source_report
+    from automation_settings import get_automation_settings
+
+    stats_snapshot = get_stats()
+    source_report = get_source_report()
+    profile = get_profile()
+    policy = get_automation_settings()
+    gmail = get_gmail_status()
+    return {
+        "status": "discovery_and_draft_only",
+        "jobs_in_current_window": stats_snapshot.get("total_jobs", 0),
+        "last_hunt": stats_snapshot.get("last_run"),
+        "source_report_available": source_report is not None,
+        "resume_uploaded": bool(profile.get("has_resume")),
+        "gmail_connected": bool(gmail.get("connected")),
+        "application_drafts_supported": True,
+        "automatic_submission_enabled": False,
+        "application_policy_enabled": bool(policy.get("enabled")),
+        "blockers": [
+            *([] if source_report is not None else ["No persisted source run report; run discovery and verify source responses."]),
+            *([] if profile.get("has_resume") else ["Upload a PDF resume to prepare grounded applications."]),
+            "Automatic third-party submission is intentionally disabled pending verified authorized ATS flow.",
+        ],
+    }
+
+
 @app.get("/api/jobs")
 def jobs(
     country: str | None = None,
