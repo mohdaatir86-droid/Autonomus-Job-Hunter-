@@ -27,9 +27,11 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
                 if server.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Fixture server did not become ready')
                 time.sleep(.2)
         with sync_playwright() as p:
-            executable=os.getenv('CHROMIUM_EXECUTABLE_PATH') or shutil.which('chromium') or shutil.which('google-chrome')
-            browser=p.chromium.launch(headless=True,**({'executable_path':executable} if executable else {}))
-            page=browser.new_page(viewport={'width':1440,'height':1100},device_scale_factor=1)
+            engine=os.getenv('BROWSER_ENGINE','chromium')
+            executable=(os.getenv('CHROMIUM_EXECUTABLE_PATH') or shutil.which('chromium') or shutil.which('google-chrome')) if engine=='chromium' else None
+            browser=getattr(p,engine).launch(headless=True,**({'executable_path':executable} if executable else {}))
+            context=browser.new_context(**(p.devices['iPhone 13'] if engine=='webkit' else {'viewport':{'width':1440,'height':1100},'device_scale_factor':1}))
+            page=context.new_page()
             errors=[]
             page.on('pageerror',lambda e:errors.append(str(e)))
             page.route('**/*',lambda route:route.continue_() if route.request.url.startswith(base) else route.abort())
@@ -46,9 +48,12 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             page.locator('#resumeFile').set_input_files({'name':'fixture-resume.pdf','mimeType':'application/pdf','buffer':text_pdf('Fixture Candidate Operations Manager warehouse inventory')})
             page.locator('#uploadResumeBtn').click()
             expect(page.locator('#profileState')).to_have_text('PROFILE READY')
+            expect(page.locator('#missionResume')).to_have_text('Resume ready')
             page.locator('.tab[data-tab="jobs"]').click()
             page.locator('#huntBtn').click()
             expect(page.locator('#jobCountBadge')).to_have_text('3 shown')
+            expect(page.locator('#missionDiscovery')).to_have_text('3 matching jobs')
+            expect(page.locator('#missionApply')).to_have_text('Drafts only')
             page.screenshot(path=str(output/'jobs-desktop.png'),full_page=True)
             page.locator('#jobsBody button').filter(has_text='Prepare draft').first.click()
             expect(page.locator('#draftDialog')).to_be_visible()
@@ -83,14 +88,25 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             expect(page.locator('#outreachDraftState')).to_contain_text('Accepted by Gmail')
             page.locator('#outreachComposeDialog button').filter(has_text='Close').click()
             page.screenshot(path=str(output/'outreach-desktop.png'),full_page=True)
-            page.set_viewport_size({'width':390,'height':844})
-            for name in ['jobs','outreach','applications','sources','settings']:
-                page.locator('.tab[data-tab="'+name+'"]').click()
-                assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth'), 'Mobile overflow: '+name
+            for width,height in [(375,667),(390,844),(430,932)]:
+                page.set_viewport_size({'width':width,'height':height})
+                for name in ['jobs','outreach','applications','sources','settings']:
+                    page.locator('.tab[data-tab="'+name+'"]').click()
+                    assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth'), f'Mobile overflow: {name} at {width}'
             page.locator('.tab[data-tab="jobs"]').click()
+            page.evaluate('document.activeElement.blur(); window.scrollTo(0,0)')
             page.screenshot(path=str(output/'jobs-mobile.png'),full_page=True)
+            page.route('**/api/operational-readiness',lambda route:route.fulfill(status=503,json={'detail':'Fixture outage'}))
+            page.get_by_role('button',name='Refresh system readiness').click()
+            expect(page.locator('#missionGmail')).to_have_text('Unknown')
+            expect(page.locator('#missionGmailNote')).to_have_text('Could not verify Gmail connection')
+            expect(page.locator('#missionResumeNote')).to_have_text('Could not verify resume status')
+            expect(page.locator('#missionApplyNote')).to_have_text('Could not verify application policy')
+            page.unroute('**/api/operational-readiness')
+            page.get_by_role('button',name='Refresh system readiness').click()
+            expect(page.locator('#missionGmail')).to_have_text('Connected')
             assert not errors,errors
-            print('PASS: redesigned jobs, profile/PDF, applications, Apollo search/reveal, verified contact, approved Gmail send (mocked), five mobile views; no JavaScript errors')
+            print(f'PASS ({engine}): jobs, profile/PDF, applications, Apollo search/reveal, verified contact, approved Gmail send (mocked), readiness refresh/outage/recovery, five views at 375/390/430px; no JavaScript errors')
             browser.close()
     finally:
         server.terminate()
