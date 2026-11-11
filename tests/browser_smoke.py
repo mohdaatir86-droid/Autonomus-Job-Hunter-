@@ -94,7 +94,8 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
                     page.locator('.tab[data-tab="'+name+'"]').click()
                     assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth'), f'Mobile overflow: {name} at {width}'
             page.locator('.tab[data-tab="jobs"]').click()
-            page.evaluate('document.activeElement.blur(); window.scrollTo(0,0)')
+            page.evaluate('document.activeElement.blur(); window.scrollTo({top:0,behavior:"instant"})')
+            expect(page.locator('.brand')).to_be_in_viewport()
             page.screenshot(path=str(output/'jobs-mobile.png'),full_page=True)
             page.route('**/api/operational-readiness',lambda route:route.fulfill(status=503,json={'detail':'Fixture outage'}))
             page.get_by_role('button',name='Refresh system readiness').click()
@@ -109,6 +110,11 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             print(f'PASS ({engine}): jobs, profile/PDF, applications, Apollo search/reveal, verified contact, approved Gmail send (mocked), readiness refresh/outage/recovery, five views at 375/390/430px; no JavaScript errors')
             browser.close()
     finally:
-        server.terminate()
+        if sys.platform=='win32':
+            # The venv launcher starts a child Python process; stop both before
+            # TemporaryDirectory removes the SQLite database on Windows.
+            subprocess.run(['taskkill','/PID',str(server.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        else:
+            server.terminate()
         try:server.wait(timeout=10)
         except subprocess.TimeoutExpired:server.kill();server.wait()
