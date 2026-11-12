@@ -12,6 +12,7 @@ ISSUER = "https://token.actions.githubusercontent.com"
 JWKS_URL = ISSUER + "/.well-known/jwks"
 AUDIENCE = "https://autonomous-job-hunter-docker.onrender.com/api/integrations/github/hunt"
 REPOSITORY = "mohdaatir86-droid/Autonomus-Job-Hunter-"
+SUBJECT = "repo:mohdaatir86-droid@335108625/Autonomus-Job-Hunter-@1428124047:ref:refs/heads/main"
 WORKFLOW_REF = REPOSITORY + "/.github/workflows/discovery.yml@refs/heads/main"
 _cached_keys = []
 _keys_expire_at = 0.0
@@ -67,7 +68,7 @@ async def verify_github_discovery_token(token: str) -> None:
         )
         expected = {
             "repository_id": "1428124047", "repository_owner_id": "335108625",
-            "sub": "repo:" + REPOSITORY + ":ref:refs/heads/main",
+            "sub": SUBJECT,
             "workflow_ref": WORKFLOW_REF, "ref": "refs/heads/main",
         }
         if any(claims.get(name) != value for name, value in expected.items()):

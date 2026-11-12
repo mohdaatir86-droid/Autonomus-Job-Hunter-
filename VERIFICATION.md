@@ -14,7 +14,7 @@ Reviewed the Job Hunter backend, source ingestion/scoring, Gmail OAuth, private 
 - Greenhouse ranks relevant jobs before caps and does not treat edits as new postings. Distinct requisitions sharing a title/employer/city are preserved; stable IDs/canonical URLs deduplicate genuine repeats. Provider cancellation no longer leaks unawaited coroutine objects.
 - Atomic application-attempt creation and browser claims prevent duplicate workers. Browser setup/navigation failures become retryable and close partial resources. Unknown required controls block form readiness.
 - Conditional outreach edit/approval writes cannot overwrite in-flight sends. Sender changes invalidate approvals while preserving unsent draft edits. Concurrent draft creation handles uniqueness conflicts.
-- GitHub Actions replaces the expired n8n discovery schedule using signed short-lived OIDC identities scoped to immutable repository/owner IDs, main branch, exact workflow, audience, issuer and time bounds. It cannot access private profile APIs. Ambiguous POST failures are not automatically retried.
+- GitHub Actions replaces the expired n8n discovery schedule using signed short-lived OIDC identities scoped to immutable repository/owner IDs, main branch, exact workflow, audience, issuer and time bounds. The subject uses GitHub's immutable owner/repository-ID format for repositories created after July 2026. A read-only route probe waits for deployment before the single discovery POST. It cannot access private profile APIs. Ambiguous POST failures are not automatically retried.
 - Docker uses exec to forward shutdown signals to Uvicorn.
 
 ## Cleanup
@@ -23,7 +23,7 @@ Removed the obsolete native-Python render.yaml Blueprint and BROWSER_WORKER_SETU
 
 ## Local validation
 
-203 tests passed; two disposable-PostgreSQL tests skipped because TEST_POSTGRES_URL was not configured locally. Python dependency consistency, JavaScript syntax and git whitespace checks passed. New tests use fixture mail/providers and generated test signing keys; no recruiter emails or job applications were sent by these tests.
+204 tests passed; two disposable-PostgreSQL tests skipped because TEST_POSTGRES_URL was not configured locally. Python dependency consistency, JavaScript syntax and git whitespace checks passed. New tests use fixture mail/providers and generated test signing keys; no recruiter emails or job applications were sent by these tests.
 
 The expanded browser smoke could not launch Chromium in this executor because its singleton socket/ptrace operations were denied. GitHub CI provisions PostgreSQL and runs the browser smoke; its result must be checked before deployment. CI/deployment results are reported in the pull request and session rather than inferred from local tests.
 

@@ -33,7 +33,7 @@ def identity(monkeypatch, signing_key):
     claims = {
         "iss": github.ISSUER, "aud": github.AUDIENCE,
         "iat": now, "nbf": now, "exp": now + 300,
-        "sub": "repo:" + github.REPOSITORY + ":ref:refs/heads/main",
+        "sub": github.SUBJECT,
         "repository_id": "1428124047", "repository_owner_id": "335108625",
         "workflow_ref": github.WORKFLOW_REF, "ref": "refs/heads/main", "event_name": "schedule",
     }
@@ -60,6 +60,7 @@ def test_correct_workflow_identity_can_trigger_discovery(identity, monkeypatch):
 @pytest.mark.parametrize("changes", [
     {"iss": "https://attacker.example"}, {"aud": "another-service"},
     {"sub": "repo:" + github.REPOSITORY + ":pull_request"},
+    {"sub": "repo:" + github.REPOSITORY + ":ref:refs/heads/main"},
     {"repository_id": "42"}, {"repository_owner_id": "42"},
     {"workflow_ref": github.WORKFLOW_REF.replace("discovery.yml", "ci.yml")},
     {"ref": "refs/heads/fork"}, {"event_name": "pull_request"},
