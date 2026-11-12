@@ -43,3 +43,66 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 @media(max-width:900px){.app-shell{display:block}.sidebar{padding:13px 18px 10px}.main-content{padding:22px 20px}.command-bar{margin-bottom:15px}.command-hero{padding:25px}.tab{min-height:38px;font-size:11px;padding:8px 11px}.command-hero h2{font-size:27px}}
 @media(max-width:600px){.main-content{padding:18px 13px 28px}.sidebar{padding:11px 12px 8px}.command-bar{gap:7px}.command-eyebrow{font-size:8px}.command-current{font-size:10px}.command-health{font-size:10px}.command-shortcut{display:none}.command-hero{padding:22px 19px;border-radius:17px;flex-direction:column;gap:18px;margin-bottom:21px}.command-hero h2{font-size:27px}.command-hero p{font-size:11px}.hero-pills{gap:6px}.hero-pills span{font-size:9px;padding:4px 8px}.hero-action{width:100%;flex-direction:row}.hero-action .btn{min-width:0;white-space:normal;font-size:10px;min-height:40px}.workspace-header h1{font-size:24px}.stat-card{padding:16px}.stat-value{font-size:29px}.stat-label{font-size:11px}.stat-note{font-size:10px}.panel-title{font-size:15px}.tab{font-size:11px}}
 @media(prefers-reduced-motion:reduce){.command-hero,.stat-card,.panel{transition:none}}
+
+
+/* CareerOS Mission Control — additive responsive redesign; legacy form and actions retained. */
+:root{--bg:#f4f6f8;--surface:#fff;--surface-soft:#f7f9fb;--border:#e4e8ee;--border-strong:#ccd5df;--ink:#152337;--text-secondary:#64738a;--muted:#7c889c;--primary:#226958;--primary-deep:#134a3d;--primary-soft:#e9f4ee;--success:#16846c;--shadow:0 12px 36px #18243808;--radius:17px}
+body{background:radial-gradient(ellipse at 80% 0%,#eaf2ef 0%,transparent 33%),#f4f6f8}
+.sidebar{background:#0c1826;padding-top:25px}
+.brand{font-size:22px;letter-spacing:-.9px}
+.brand small{color:#7aa794;font-size:8px}
+.brand-mark{background:#276c58;box-shadow:0 5px 20px #00a87d26}
+.tab.active{background:#18382f;box-shadow:inset 3px 0 #60c9a3}
+.active .nav-icon{color:#7bdfbd}
+.sidebar-note{border:1px solid #244334;border-radius:12px;padding:16px;margin:20px 2px;color:#c2d8ce;background:#102c27}
+.sidebar-note p{color:#86a69c}
+.main-content{max-width:1620px;padding:26px 36px 22px}
+.command-bar{border-radius:12px}
+.command-hero{position:relative;isolation:isolate;overflow:hidden;border-radius:23px!important;background:linear-gradient(115deg,#102e2c 0%,#123f37 52%,#0a222c 100%)!important;border:1px solid #245d52!important;color:white!important;padding:35px 38px!important;box-shadow:0 18px 42px #09362c18;margin-bottom:24px}
+.command-hero:before{content:"";position:absolute;z-index:-1;width:420px;height:420px;border:1px solid #ffffff21;border-radius:50%;right:-120px;top:-180px;box-shadow:0 0 0 50px #ffffff07,0 0 0 100px #ffffff06}
+.command-hero:after{content:"";position:absolute;z-index:-1;right:15%;bottom:-55px;width:180px;height:180px;background:#70f5b90c;filter:blur(30px);border-radius:50%}
+.command-hero h2{font-size:clamp(31px,3.2vw,49px)!important;line-height:1.08!important;letter-spacing:-1.9px!important;font-weight:780!important;max-width:760px}
+.command-hero h2 em{font-style:normal;color:#8eebbe}
+.command-hero p{color:#b8d6cc!important;max-width:640px;font-size:13px!important;line-height:1.8}
+.command-hero .hero-tag{color:#a9f6c7}
+.command-hero .hero-pills span{background:#ffffff13!important;border-color:#ffffff24!important;color:#dbf4e8!important}
+.command-hero .btn-primary{background:#9ae7bf;color:#092b22;border-color:#9ae7bf}
+.command-hero .btn-primary:hover{background:#bbf6d8;border-color:#bbf6d8}
+.command-hero .btn-secondary{background:#ffffff19;color:#fff;border:1px solid #ffffff43}
+.btn-primary{background:#1d6b55;border-color:#1d6b55;box-shadow:none}
+.btn-primary:hover:not(:disabled){background:#10503d;border-color:#10503d}
+.btn{border-radius:10px}
+.chip.active{color:#176a4a;background:#e6f3ed;border-color:#c8e5d7}
+.location-chips span:first-child{color:#13654c;background:#e7f4eb;border-color:#cbe7da}
+.panel,.stat-card{box-shadow:var(--shadow);border-color:#e1e8ec}
+.stat-value.accent-value{color:#176b51}
+.score-pill.high{background:#e6f4ec;color:#14684f;border-color:#cfe9da}
+.workspace-notice{background:#edf6f1;border:1px solid #d7ebdf}
+.workspace-notice .notice-icon{color:#27765a}
+.workspace-notice p{color:#59796e}
+.workspace-notice .btn-white{color:#145c43;border-color:#cce5d7}
+.tab,.btn,.chip{transition:background .15s ease,transform .15s ease}
+.btn:hover:not(:disabled){transform:translateY(-1px)}
+.mission-control{margin:0 0 26px;padding:23px 23px 18px;background:white;border:1px solid #e1e9e7;border-radius:20px;box-shadow:var(--shadow)}
+.mission-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:21px}
+.mission-eyebrow{display:inline-flex;align-items:center;gap:8px;color:#278566;font-size:9px;font-weight:800;letter-spacing:2px}
+.mission-pulse{width:7px;height:7px;background:#27a87f;border-radius:50%;box-shadow:0 0 0 4px #28b58415}
+.mission-top h2{font-size:21px;letter-spacing:-.6px;margin:7px 0 5px;line-height:1.25}
+.mission-top p{font-size:11px;color:var(--muted);margin:0}
+.mission-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.mission-card{display:flex;flex-direction:column;align-items:flex-start;min-width:0;min-height:164px;padding:17px;border:1px solid #e5ecea;border-radius:13px;background:linear-gradient(160deg,#fafdfe,#f7faf9)}
+.mission-card:nth-child(2){background:linear-gradient(160deg,#f9fbff,#f4f8fa)}
+.mission-card:nth-child(3){background:linear-gradient(160deg,#fffdfa,#fbfaf6)}
+.mission-card:nth-child(4){background:linear-gradient(160deg,#f8fffc,#f5faf8)}
+.mission-kicker{font-size:9px;letter-spacing:1.35px;font-weight:800;color:#7f938d;margin-bottom:15px}
+.mission-card strong{color:#19362c;font-size:20px;letter-spacing:-.6px;font-weight:770;line-height:1.25;margin-bottom:7px}
+.mission-card>span:nth-of-type(2){font-size:10px;color:#71847d;line-height:1.6}
+.mission-link{margin-top:auto;border:0;padding:12px 0 0;background:transparent;color:#196b50;font-size:10px;font-weight:760}
+.mission-link:hover{text-decoration:underline}
+.mission-bottom{display:flex;gap:10px;justify-content:space-between;align-items:center;background:#f3f8f5;border:1px solid #e4eee7;border-radius:12px;padding:14px 17px;margin-top:13px}
+.mission-bottom-label{display:block;color:#639681;font-size:8px;font-weight:800;letter-spacing:1.6px}
+.mission-bottom p{margin:4px 0 0;font-size:11px;color:#325c4d;line-height:1.65}
+.mission-footnote{font-size:9px;color:#8d9e96;white-space:nowrap}
+@media(max-width:1150px){.mission-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.command-hero{padding:27px!important}.main-content{padding:20px 22px}}
+@media(max-width:750px){.main-content{padding:16px 13px 95px}.command-hero{border-radius:17px!important;padding:25px 20px!important}.command-hero h2{font-size:35px!important}.command-hero:before{right:-300px}.mission-control{padding:16px;border-radius:16px}.mission-top h2{font-size:18px}.mission-top{align-items:flex-start}.mission-grid{gap:8px}.mission-card{min-height:150px;padding:13px}.mission-card strong{font-size:16px}.mission-kicker{font-size:8px;letter-spacing:.8px}.mission-bottom{align-items:flex-start;flex-direction:column}.mission-footnote{white-space:normal}.mission-refresh{padding:7px!important;min-height:30px!important;white-space:normal}.workspace-header h1{font-size:23px}}
+@media(max-width:390px){.mission-grid{grid-template-columns:1fr 1fr}.mission-card strong{font-size:14px}.mission-card{padding:10px}.mission-top p{max-width:230px}}
