@@ -20,11 +20,11 @@ def test_empty_postgres_bootstrap_and_repeatable_workflow(monkeypatch):
     headers = {'Authorization': 'Bearer ' + 'test-postgres-private-key-' * 3}
     for _ in range(2):
         with TestClient(main.app) as client:
-            health = client.get('/health/db').json()
+            health = client.get('/health/db', headers=headers).json()
             assert health['ok'], health
             job_sources.ensure_job_columns()
             job_sources.ensure_job_columns()
-            assert client.get('/api/jobs').status_code == 200
+            assert client.get('/api/jobs', headers=headers).status_code == 200
             assert client.post('/api/settings', headers=headers, json={'target_countries':['India']}).json()['target_countries'] == ['India']
     now = job_hunter.now_iso()
     with job_hunter.connect() as conn:

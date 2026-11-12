@@ -160,6 +160,11 @@ async def _run(draft_id: int, dry_run: bool = True) -> dict:
             "attempt_id": attempt["id"],
             "state": attempt["state"],
         }
+    if attempt['state'] not in {'discovered', 'scored', 'queued', 'failed'}:
+        return {
+            'status': 'skipped', 'reason': 'attempt_requires_manual_review',
+            'attempt_id': attempt['id'], 'state': attempt['state'],
+        }
 
     if not _allowed_url(url):
         _event(draft_id, "browser_skipped", "Unsupported host; only Greenhouse/Lever public HTTPS URLs allowed.")
@@ -188,20 +193,23 @@ async def _run(draft_id: int, dry_run: bool = True) -> dict:
         return {"status": "unavailable", "detail": "Playwright dependency is not installed."}
 
     try:
-        transition(attempt["id"], "scored", note="matched policy")
-        transition(attempt["id"], "queued", note="browser worker started")
+        if attempt['state'] == 'discovered':
+            transition(attempt["id"], "scored", note="matched policy")
+        if attempt['state'] != 'queued':
+            transition(attempt["id"], "queued", note="browser worker started")
         transition(attempt["id"], "opening_job", note=url[:200])
     except ValueError:
-        pass
+        return {'status': 'skipped', 'reason': 'attempt_changed_concurrently', 'attempt_id': attempt['id']}
 
     ws = os.getenv("BROWSER_WS_ENDPOINT", "").strip()
     async with async_playwright() as p:
-        browser = await (
-            p.chromium.connect_over_cdp(ws) if ws else p.chromium.launch(headless=True)
-        )
-        context = await browser.new_context(accept_downloads=False)
-        page = await context.new_page()
+        browser = context = None
         try:
+            browser = await (
+                p.chromium.connect_over_cdp(ws) if ws else p.chromium.launch(headless=True)
+            )
+            context = await browser.new_context(accept_downloads=False)
+            page = await context.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(1200)
             current_url = page.url
@@ -232,8 +240,11 @@ async def _run(draft_id: int, dry_run: bool = True) -> dict:
 
             form = forms.first
             inputs = form.locator("input, textarea, select")
-            count = min(await inputs.count(), 100)
+            total_inputs = await inputs.count()
+            count = min(total_inputs, 100)
             filled, unknown_required, blocked_fields = [], [], []
+            if total_inputs > count:
+                unknown_required.append('Additional form fields require manual review')
 
             for i in range(count):
                 el = inputs.nth(i)
@@ -261,8 +272,8 @@ async def _run(draft_id: int, dry_run: bool = True) -> dict:
                             blocked_fields.append(label[:120])
                         continue
                     if typ in {"hidden", "submit", "button", "password", "file", "checkbox", "radio"}:
-                        if typ == "file" and required:
-                            unknown_required.append(label[:120] or "file_upload")
+                        if required and typ in {"file", "checkbox", "radio", "password"}:
+                            unknown_required.append(label[:120] or typ)
                         continue
                     value = _profile_value(profile, label, name, placeholder)
                     if value is not None and str(value).strip():
@@ -275,7 +286,8 @@ async def _run(draft_id: int, dry_run: bool = True) -> dict:
                     elif required and not (await el.input_value()).strip():
                         unknown_required.append(label[:120])
                 except Exception:
-                    continue
+                    # An unreadable or unfillable field is not evidence of readiness.
+                    unknown_required.append('Field could not be checked or filled')
 
             if blocked_fields:
                 _event(
@@ -329,9 +341,27 @@ async def _run(draft_id: int, dry_run: bool = True) -> dict:
                 "url": url,
                 "detail": "Dry-run check complete. The temporary browser closes without submitting. Open the employer link to review and apply manually.",
             }
+        except Exception as exc:
+            # Setup/navigation can fail after the attempt was claimed. Release it
+            # into a retryable failed state instead of leaving it opening forever.
+            failure = type(exc).__name__
+            try:
+                transition(attempt['id'], 'failed', note='browser_error: ' + failure, reason='browser_error')
+            except ValueError:
+                pass
+            return {'status': 'error', 'reason': 'browser_error', 'error_type': failure, 'attempt_id': attempt['id']}
         finally:
-            await context.close()
-            await browser.close()
+            # Close whichever resources were created, including partial setup.
+            if context is not None:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+            if browser is not None:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
 
 
 async def run_application_worker(draft_id: int, dry_run: bool = True) -> dict:

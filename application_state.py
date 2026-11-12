@@ -170,17 +170,13 @@ def get_or_create_attempt(
     key = stable_job_key(portal, source_id, url)
     now = _now()
     with db_connect(DB_PATH) as conn:
-        row = conn.execute(
-            "SELECT * FROM application_attempts WHERE job_key=?", (key,)
-        ).fetchone()
-        if row:
-            return dict(row)
-        conn.execute(
+        inserted = conn.execute(
             """
             INSERT INTO application_attempts
             (job_key, job_id, draft_id, portal, job_url, title, company, state,
              attempt_count, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'discovered', 0, ?, ?)
+            ON CONFLICT(job_key) DO NOTHING
             """,
             (
                 key,
@@ -198,14 +194,15 @@ def get_or_create_attempt(
             "SELECT * FROM application_attempts WHERE job_key=?", (key,)
         ).fetchone()
         attempt = dict(row)
-        conn.execute(
-            """
-            INSERT INTO application_state_events
-            (attempt_id, from_state, to_state, note, created_at)
-            VALUES (?, NULL, 'discovered', 'attempt created', ?)
-            """,
-            (attempt["id"], now),
-        )
+        if inserted.rowcount == 1:
+            conn.execute(
+                """
+                INSERT INTO application_state_events
+                (attempt_id, from_state, to_state, note, created_at)
+                VALUES (?, NULL, 'discovered', 'attempt created', ?)
+                """,
+                (attempt["id"], now),
+            )
         return attempt
 
 
@@ -230,8 +227,8 @@ def transition(
         current = dict(row)
         from_state = current["state"]
         allowed = ALLOWED_TRANSITIONS.get(from_state, set())
-        if to_state == from_state and to_state == "submitting":
-            raise ValueError("submission already claimed")
+        if to_state == from_state and to_state in {"opening_job", "submitting"}:
+            raise ValueError("attempt already claimed")
         if to_state != from_state and to_state not in allowed:
             raise ValueError(f"illegal transition {from_state} -> {to_state}")
         if from_state in TERMINAL_SUCCESS and to_state != from_state:

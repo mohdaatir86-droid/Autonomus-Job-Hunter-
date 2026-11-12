@@ -34,8 +34,9 @@ def test_operational_readiness_does_not_claim_auto_submission():
 
 
 @pytest.mark.parametrize('ready', [False, True])
-def test_readiness_http_contract_for_mission_control(ready):
+def test_readiness_http_contract_for_mission_control(ready,monkeypatch):
     from unittest.mock import patch
+    monkeypatch.setenv('PORTAL_ACCESS_TOKEN','fixture-readiness-owner-key-00001')
 
     last = {'finished_at': '2026-11-10T12:00:00+00:00', 'fetched': 7, 'errors': '[]'} if ready else None
     with patch('job_sources.get_source_report', return_value={} if ready else None), \
@@ -44,7 +45,8 @@ def test_readiness_http_contract_for_mission_control(ready):
          patch('automation_settings.get_automation_settings', return_value={'enabled': ready}), \
          patch('main.get_gmail_status', return_value={'connected': ready, 'email': 'private@example.com'}), \
          TestClient(main.app) as client:
-        response = client.get('/api/operational-readiness')
+        assert client.get('/api/operational-readiness').status_code==401
+        response = client.get('/api/operational-readiness',headers={'Authorization':'Bearer fixture-readiness-owner-key-00001'})
     assert response.status_code == 200
     data = response.json()
     assert data['jobs_in_current_window'] == (3 if ready else 0)

@@ -21,3 +21,7 @@ client_secret*.json
 
 # Test fixtures are not part of the production runtime.
 tests/
+
+# CI definitions and operator guides are not runtime assets.
+.github/
+*.md

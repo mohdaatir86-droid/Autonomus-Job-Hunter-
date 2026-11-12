@@ -33,9 +33,14 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             context=browser.new_context(**(p.devices['iPhone 13'] if engine=='webkit' else {'viewport':{'width':1440,'height':1100},'device_scale_factor':1}))
             page=context.new_page()
             errors=[]
+            protected_reads=[]
             page.on('pageerror',lambda e:errors.append(str(e)))
+            private_paths=['/api/jobs','/api/stats','/api/settings','/api/sources','/api/operational-readiness']
+            page.on('request',lambda request:protected_reads.append(request.url) if any(request.url.split('?')[0]==base+path for path in private_paths) else None)
             page.route('**/*',lambda route:route.continue_() if route.request.url.startswith(base) else route.abort())
             page.goto(base+'/#settings',wait_until='networkidle')
+            expect(page.locator('#missionDiscovery')).to_have_text('Sign in required')
+            assert protected_reads==[], 'Signed-out page must not fetch private candidate data'
             details=page.locator('#profileConnect details')
             if not details.evaluate('(e)=>e.open'):details.locator('summary').click()
             page.locator('#portalTokenInput').fill('fixture-frontend-owner-private-key-00001')
@@ -49,6 +54,13 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             page.locator('#uploadResumeBtn').click()
             expect(page.locator('#profileState')).to_have_text('PROFILE READY')
             expect(page.locator('#missionResume')).to_have_text('Resume ready')
+            page.locator('#searchPreferences summary').click()
+            page.locator('#targetDays').fill('7')
+            page.get_by_role('button',name='Save search preferences',exact=True).click()
+            expect(page.locator('#filterPosted')).to_have_value('7')
+            page.reload(wait_until='networkidle')
+            expect(page.locator('#profileState')).to_have_text('PROFILE READY')
+            expect(page.locator('#filterPosted')).to_have_value('7')
             page.locator('.tab[data-tab="jobs"]').click()
             page.locator('#huntBtn').click()
             expect(page.locator('#jobCountBadge')).to_have_text('3 shown')
@@ -106,8 +118,70 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             page.unroute('**/api/operational-readiness')
             page.get_by_role('button',name='Refresh system readiness').click()
             expect(page.locator('#missionGmail')).to_have_text('Connected')
+            # A slow old filter response must not overwrite the latest search.
+            page.locator('.tab[data-tab="jobs"]').click()
+            pending=[]
+            def filter_route(route):
+                if 'q=stale' in route.request.url:
+                    pending.append(route)
+                    return
+                return route.fulfill(status=200,json={'items':[{'id':999,'title':'Latest filter role','company':'Latest company','country':'India','location':'Noida','source':'Fixture','url':'https://example.com/jobs/latest','match_score':80,'status':'new','match_reasons':[]}]})
+            filter_pattern=re.compile(re.escape(base)+r'/api/jobs\?.*')
+            page.route(filter_pattern,filter_route)
+            page.locator('#jobSearch').fill('stale')
+            with page.expect_request(re.compile(r'.*q=stale.*')):
+                page.locator('#jobSearch').press('Enter')
+            page.locator('#jobSearch').fill('latest')
+            page.locator('#jobSearch').press('Enter')
+            expect(page.locator('#jobsBody')).to_contain_text('Latest filter role')
+            assert len(pending)==1
+            pending[0].fulfill(status=200,json={'items':[{'id':998,'title':'Stale filter role','company':'Stale company','country':'India','location':'Noida','source':'Fixture','url':'https://example.com/jobs/stale','match_score':80,'status':'new','match_reasons':[]}]})
+            page.wait_for_load_state('networkidle')
+            expect(page.locator('#jobsBody')).to_contain_text('Latest filter role')
+            expect(page.locator('#jobsBody')).not_to_contain_text('Stale filter role')
+            page.unroute(filter_pattern)
+            # Signing out must clear both visible and hidden private data, including dialogs.
+            page.locator('.tab[data-tab="settings"]').click()
+            page.locator('#changeTokenBtn').click()
+            expect(page.locator('#profileForm')).to_be_hidden()
+            expect(page.locator('#profileName')).to_have_value('')
+            expect(page.locator('#profileEmail')).to_have_value('')
+            expect(page.locator('#missionDiscovery')).to_have_text('Sign in required')
+            expect(page.locator('#jobsBody')).not_to_contain_text('Example Logistics')
+            expect(page.locator('#applicationsBody')).not_to_contain_text('Example Logistics')
+            expect(page.locator('#outreachContacts')).not_to_contain_text('recruiter@example.com')
+            expect(page.locator('#outreachQueue')).not_to_contain_text('recruiter@example.com')
+            expect(page.locator('#draftBody')).to_have_text('')
+            expect(page.locator('#outreachBody')).to_have_value('')
+            assert page.evaluate("localStorage.getItem('jobHunterPortalAccessToken')") is None
+            before=len(protected_reads)
+            page.locator('.tab[data-tab="sources"]').click()
+            page.get_by_role('button',name='Refresh workspace').click()
+            page.wait_for_load_state('networkidle')
+            assert len(protected_reads)==before, 'Signed-out refresh must not fetch private endpoints'
+            # Simulate an existing Google session on a fresh context. Requests still
+            # hit fixture APIs, with the fixture owner credential injected by routing.
+            google_context=browser.new_context(viewport={'width':1440,'height':1100})
+            google_page=google_context.new_page()
+            google_page.on('pageerror',lambda e:errors.append(str(e)))
+            def google_route(route):
+                if not route.request.url.startswith(base):return route.abort()
+                if route.request.url==base+'/api/auth/session':
+                    return route.fulfill(status=200,json={'authenticated':True,'email':'candidate@example.com'})
+                headers={**route.request.headers,'Authorization':'Bearer fixture-frontend-owner-private-key-00001'}
+                return route.continue_(headers=headers)
+            google_page.route('**/*',google_route)
+            google_page.goto(base+'/#applications',wait_until='networkidle')
+            expect(google_page.locator('#applicationsBody')).to_contain_text('Example Logistics')
+            expect(google_page.locator('#profileName')).to_have_value('Fixture Candidate')
+            assert google_page.evaluate("localStorage.getItem('jobHunterPortalAccessToken')") is None
+            google_page.locator('.tab[data-tab="settings"]').click()
+            google_page.locator('#signOutGoogleBtn').click()
+            expect(google_page.locator('#profileName')).to_have_value('')
+            expect(google_page.locator('#applicationsBody')).not_to_contain_text('Example Logistics')
+            google_context.close()
             assert not errors,errors
-            print(f'PASS ({engine}): jobs, profile/PDF, applications, Apollo search/reveal, verified contact, approved Gmail send (mocked), readiness refresh/outage/recovery, five views at 375/390/430px; no JavaScript errors')
+            print(f'PASS ({engine}): signed-out privacy, auth-first hydration, jobs, profile/PDF, applications, Apollo search/reveal, verified contact, approved Gmail send (mocked), readiness refresh/outage/recovery, five views at 375/390/430px, sign-out cache clearing and restored Google-session application view; no JavaScript errors')
             browser.close()
     finally:
         if sys.platform=='win32':

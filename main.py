@@ -6,6 +6,7 @@ import hashlib
 import json
 import secrets
 import time
+import asyncio
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timezone
@@ -80,6 +81,12 @@ PORTAL_CSRF_COOKIE = "jh_portal_csrf"
 PORTAL_SESSION_SECONDS = 7 * 24 * 60 * 60
 
 
+def _secure_equal(left: str, right: str) -> bool:
+    # compare_digest(str, str) rejects non-ASCII input. Request headers, cookies
+    # and query parameters are untrusted Unicode and should fail closed, not 500.
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
 def _portal_session_key() -> bytes | None:
     access_token = os.getenv("PORTAL_ACCESS_TOKEN", "").strip()
     if len(access_token) < 32:
@@ -108,7 +115,7 @@ def _read_portal_session(token: str | None, now: int | None = None) -> dict[str,
     try:
         payload_part, signature = token.split(".", 1)
         expected = _b64url(hmac.new(key, payload_part.encode("ascii"), hashlib.sha256).digest())
-        if not hmac.compare_digest(signature, expected):
+        if not _secure_equal(signature, expected):
             return None
         padded = payload_part + "=" * (-len(payload_part) % 4)
         payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
@@ -129,7 +136,7 @@ def _portal_session_matches_profile(session: dict[str, Any] | None) -> bool:
         return False
     profile_email = str(get_profile().get("email") or "").strip().lower()
     session_email = str(session.get("email") or "").strip().lower()
-    return bool(profile_email and session_email and hmac.compare_digest(profile_email, session_email))
+    return bool(profile_email and session_email and _secure_equal(profile_email, session_email))
 
 
 def _verify_google_credential(credential: str) -> dict[str, Any]:
@@ -267,6 +274,20 @@ app.add_middleware(
 @app.middleware("http")
 async def protect_private_candidate_data(request, call_next):
     path = request.url.path
+    github_discovery = path == "/api/integrations/github/hunt" and request.method == "POST"
+    if github_discovery:
+        from github_discovery import verify_github_discovery_token
+
+        supplied = request.headers.get("authorization", "")
+        token = supplied[7:] if supplied.lower().startswith("bearer ") else ""
+        if not token:
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized."})
+        try:
+            await verify_github_discovery_token(token)
+        except ValueError:
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized."})
+        except RuntimeError:
+            return JSONResponse(status_code=503, content={"detail": "GitHub discovery authentication is temporarily unavailable."})
     if path == "/api/integrations/n8n/hunt" and request.method != "OPTIONS":
         expected = os.getenv("N8N_AUTOMATION_TOKEN", "").strip()
         if len(expected) < 32:
@@ -276,17 +297,19 @@ async def protect_private_candidate_data(request, call_next):
             )
         supplied = request.headers.get("authorization", "")
         token = supplied[7:] if supplied.lower().startswith("bearer ") else ""
-        if not token or not hmac.compare_digest(token, expected):
+        if not token or not _secure_equal(token, expected):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Unauthorized."},
             )
     protected = (
         (request.method not in {"GET", "HEAD", "OPTIONS"} and path.startswith("/api/")
-         and path not in {"/api/integrations/n8n/hunt", "/api/auth/google/session", "/api/auth/logout"})
+         and path not in {"/api/integrations/n8n/hunt", "/api/auth/google/session", "/api/auth/logout"}
+         and not github_discovery)
         or path == "/api/gmail/auth"
         or path == "/api/gmail/status"
         or path == "/api/setup"
+        or path in {"/api/jobs", "/api/stats", "/api/settings", "/api/sources", "/api/operational-readiness", "/health/db"}
         or path.startswith("/api/outreach")
         or path == "/health/browser"
         or path == "/api/profile"
@@ -310,7 +333,7 @@ async def protect_private_candidate_data(request, call_next):
             )
         supplied = request.headers.get("authorization", "")
         token = supplied[7:] if supplied.lower().startswith("bearer ") else ""
-        if token and hmac.compare_digest(token, expected):
+        if token and _secure_equal(token, expected):
             return await call_next(request)
 
         session = _read_portal_session(request.cookies.get(PORTAL_SESSION_COOKIE))
@@ -322,7 +345,7 @@ async def protect_private_candidate_data(request, call_next):
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             csrf_cookie = request.cookies.get(PORTAL_CSRF_COOKIE, "")
             csrf_header = request.headers.get("x-jh-csrf", "")
-            if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+            if not csrf_cookie or not csrf_header or not _secure_equal(csrf_cookie, csrf_header):
                 return JSONResponse(status_code=403, content={"detail": "The request could not be verified. Refresh and try again."})
     return await call_next(request)
 
@@ -348,17 +371,7 @@ def health():
         "status": "ok",
         "service": "autonomous-job-hunter",
         "version": app.version,
-        "database_mode": "postgresql" if postgres_enabled() else "sqlite",
         "time": datetime.now(timezone.utc).isoformat(),
-        "live_applications_enabled": False,
-        "browser_submit_enabled": False,
-        "admin_endpoints_locked": bool(os.getenv("PORTAL_ACCESS_TOKEN", "").strip()),
-        "application_preparation_enabled": True,
-        "resume_profile_configured": get_profile().get("has_resume", False),
-        "browser_worker_enabled": os.getenv("BROWSER_WORKER_ENABLED", "false").lower() == "true",
-        "gmail": {"oauth_configured": get_gmail_status().get("oauth_configured", False), "connected": get_gmail_status().get("connected", False)},
-        "ai": ai_status(),
-        "notifications": notify_status(),
     }
 
 
@@ -404,17 +417,19 @@ async def google_sign_in(request: Request):
         form = await request.form()
         form_csrf = str(form.get("g_csrf_token") or "")
         cookie_csrf = request.cookies.get("g_csrf_token", "")
-        if not form_csrf or not cookie_csrf or not hmac.compare_digest(form_csrf, cookie_csrf):
+        if not form_csrf or not cookie_csrf or not _secure_equal(form_csrf, cookie_csrf):
             return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
         credential = str(form.get("credential") or "")
         if not credential or len(credential) > 16384:
             return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
-        claims = _verify_google_credential(credential)
+        # google-auth fetches verification certificates through synchronous HTTP.
+        # Keep login latency from blocking every request and scheduled job.
+        claims = await asyncio.to_thread(_verify_google_credential, credential)
         email = str(claims.get("email") or "").strip().lower()
         if claims.get("email_verified") is not True or not claims.get("sub") or not email:
             return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
         profile_email = str(get_profile().get("email") or "").strip().lower()
-        if not profile_email or not hmac.compare_digest(profile_email, email):
+        if not profile_email or not _secure_equal(profile_email, email):
             return RedirectResponse("/?google_signin=email_mismatch#profilePanel", status_code=303)
         session_cookie = _issue_portal_session(email)
         if not session_cookie:
@@ -518,6 +533,7 @@ def jobs(
 
 @app.post("/api/hunt")
 @app.post("/api/integrations/n8n/hunt")
+@app.post("/api/integrations/github/hunt")
 async def hunt():
     return await hunt_jobs()
 
@@ -814,10 +830,14 @@ def _gmail_connect_response(request: Request, *, allow_send: bool = False):
 
 
 @app.get("/api/gmail/callback")
-async def gmail_callback(request: Request, code: str = "", state: str = ""):
+async def gmail_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     cookie_state = request.cookies.get("jh_gmail_state", "")
-    if not cookie_state or not state or not hmac.compare_digest(cookie_state, state) or not verify_oauth_state(state, consume=True):
+    if not cookie_state or not state or not _secure_equal(cookie_state, state) or not verify_oauth_state(state, consume=True):
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state. Connect Gmail again from your private profile.")
+    if error:
+        response = RedirectResponse("/?gmail=denied#sources", status_code=303)
+        response.delete_cookie("jh_gmail_state", path="/api/gmail")
+        return response
     result = await exchange_code(code)
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "oauth failed"))
