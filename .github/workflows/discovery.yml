@@ -24,36 +24,41 @@ jobs:
         with:
           script: |
             const endpoint = 'https://autonomous-job-hunter-docker.onrender.com/api/integrations/github/hunt';
-            // A push can arrive before Render finishes deploying the new endpoint.
-            for (let attempt = 0; attempt < 6; attempt++) {
-              const token = await core.getIDToken(endpoint);
-              let response;
+            // Probe the route without invoking discovery while Render is deploying.
+            // GET returns 405 only after the POST route exists. Older versions can
+            // reject the POST with owner-auth 401 before routing, rather than 404.
+            let ready = false;
+            for (let attempt = 0; attempt < 10; attempt++) {
               try {
-                response = await fetch(endpoint, {
-                  method: 'POST',
-                  headers: {Authorization: `Bearer ${token}`},
-                  signal: AbortSignal.timeout(240000)
-                });
-              } catch (error) {
-                // The result of a timed-out POST is ambiguous; do not repeat it.
-                core.setFailed('Discovery request could not be verified. Check private run history before retrying.');
-                return;
-              }
-              if (response.status === 404 && attempt < 5) {
-                await new Promise(resolve => setTimeout(resolve, 30000));
-                continue;
-              }
-              if (!response.ok) {
-                core.setFailed(`Discovery failed with HTTP ${response.status}; inspect the private dashboard.`);
-                return;
-              }
-              const result = await response.json();
-              // Never print source payloads, mailbox content, job URLs or credentials.
-              core.info(`Run ${result.status}: fetched=${Number(result.fetched || 0)}, new=${Number(result.new_jobs || 0)}, source_issues=${(result.errors || []).length}`);
-              if (!['completed', 'already_running'].includes(result.status)) {
-                core.setFailed('Discovery did not report a completed run.');
-              } else if ((result.errors || []).length) {
-                core.warning('Some providers need attention; see private source health.');
-              }
+                const probe = await fetch(endpoint, {signal: AbortSignal.timeout(15000)});
+                if (probe.status === 405) { ready = true; break; }
+              } catch (_) {}
+              await new Promise(resolve => setTimeout(resolve, 15000));
+            }
+            if (!ready) { core.setFailed('Discovery endpoint is not ready after deployment.'); return; }
+            const token = await core.getIDToken(endpoint);
+            let response;
+            try {
+              response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {Authorization: `Bearer ${token}`},
+                signal: AbortSignal.timeout(240000)
+              });
+            } catch (error) {
+              // The result of a timed-out POST is ambiguous; do not repeat it.
+              core.setFailed('Discovery request could not be verified. Check private run history before retrying.');
               return;
             }
+            if (!response.ok) {
+              core.setFailed(`Discovery failed with HTTP ${response.status}; inspect the private dashboard.`);
+              return;
+            }
+            const result = await response.json();
+            // Never print source payloads, mailbox content, job URLs or credentials.
+            core.info(`Run ${result.status}: fetched=${Number(result.fetched || 0)}, new=${Number(result.new_jobs || 0)}, source_issues=${(result.errors || []).length}`);
+            if (!['completed', 'already_running'].includes(result.status)) {
+              core.setFailed('Discovery did not report a completed run.');
+            } else if ((result.errors || []).length) {
+              core.warning('Some providers need attention; see private source health.');
+            }
+            return;
