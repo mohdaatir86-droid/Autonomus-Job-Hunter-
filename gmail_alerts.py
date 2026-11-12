@@ -13,9 +13,10 @@ import re
 import secrets
 import hashlib
 import hmac
+from html.parser import HTMLParser
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
@@ -300,6 +301,42 @@ async def _access_token() -> str | None:
     return new_token
 
 
+class _AlertHTMLText(HTMLParser):
+    """Keep anchor destinations beside their visible text in HTML alerts."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.anchors = []
+        self.hidden = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style"}:
+            self.hidden.append(tag)
+        if self.hidden:
+            return
+        if tag == "a":
+            self.anchors.append(dict(attrs).get("href") or "")
+        if tag in {"br", "p", "div", "td", "tr", "li"}:
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag):
+        if self.hidden:
+            if tag == self.hidden[-1]:
+                self.hidden.pop()
+            return
+        if tag == "a" and self.anchors:
+            href = self.anchors.pop().strip()
+            if href.lower().startswith(("https://", "http://")):
+                self.parts.append(" " + href + " ")
+        if tag in {"p", "div", "td", "tr", "li"}:
+            self.parts.append(" ")
+
+    def handle_data(self, data):
+        if not self.hidden:
+            self.parts.append(data)
+
+
 def _decode_body(payload: dict) -> str:
     parts = []
 
@@ -310,7 +347,13 @@ def _decode_body(payload: dict) -> str:
         data = body.get("data")
         if data:
             try:
-                parts.append(base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="ignore"))
+                decoded = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="ignore")
+                if p.get("mimeType") == "text/html" or (not p.get("mimeType") and "<" in decoded):
+                    parser = _AlertHTMLText()
+                    parser.feed(decoded)
+                    parser.close()
+                    decoded = "".join(parser.parts)
+                parts.append(decoded)
             except Exception:
                 pass
         for child in p.get("parts") or []:
@@ -318,7 +361,6 @@ def _decode_body(payload: dict) -> str:
 
     walk(payload)
     text = "\n".join(parts)
-    text = re.sub(r"<[^>]+>", " ", text)
     return normalize_text(text)
 
 
@@ -353,19 +395,27 @@ def _extract_jobs_from_email(subject: str, from_header: str, body: str, message_
     for m in URL_RE.finditer(content):
         u = m.group(0).rstrip(").,;\"'")
         low = u.lower()
+        try:
+            parsed = urlsplit(u)
+            host = (parsed.hostname or "").lower()
+        except ValueError:
+            continue
+        if parsed.username is not None or parsed.password is not None:
+            continue
         if any(
-            x in low
-            for x in (
+            host == domain or host.endswith("." + domain)
+            for domain in (
                 "naukri.com",
                 "naukrigulf.com",
                 "linkedin.com",
                 "shine.com",
-                "monster",
+                "monster.com",
+                "monsterindia.com",
                 "bayt.com",
-                "gulftalent",
+                "gulftalent.com",
                 "indeed.com",
                 "foundit.in",
-                "timesjobs",
+                "timesjobs.com",
                 "hirist.com",
                 "iimjobs.com",
                 "catererglobal.com",
