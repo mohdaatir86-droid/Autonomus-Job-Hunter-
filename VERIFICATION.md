@@ -1,50 +1,37 @@
-# Implementation verification
+# Full audit and cleanup — 13 November 2026
 
-The requested workflow is operations leadership discovery for Delhi NCR, Uttar Pradesh, Dehradun and the Gulf; private PDF/profile-based drafts; email alerts when configured; and human-reviewed application tracking. Submission remains disabled.
+## Scope
 
-## Verified in the development environment
+Reviewed the Job Hunter backend, source ingestion/scoring, Gmail OAuth, private workspace APIs, application state, recruiter approval/sending, browser dry runs, dashboard, tests, Docker configuration and operating documentation. The separate Product Hunter, LinkedIn Autonomous and crypto repositories are independent projects.
 
-- 93 tests passed with SQLite and a disposable PostgreSQL 17 database. No tests were skipped in this run. One dependency deprecation warning concerns Starlette's future HTTP test transport; it does not fail the suite.
-- PostgreSQL schema bootstrap and repeat startup passed. Repeated normalized-URL column initialization no longer aborts PostgreSQL transactions.
-- Owner authorization, separate n8n authentication, session CSRF, single-use browser-bound Gmail OAuth state, Gmail account matching and public mailbox redaction passed regression checks.
-- Saved preferences survive database initialization. Country/location matching includes Bahrain and Uttar Pradesh cities even when the country suffix is absent.
-- A fixture hunt rejects Mumbai for the requested regions, keeps Noida and Bahrain, extracts a real test PDF, creates truthful template drafts, avoids re-preparing the same jobs and synchronizes application status.
-- Expired postings remain accessible through tracking status. Notification candidate selection excludes stale and undated jobs.
-- A Chromium smoke check passed login, profile save, real PDF upload, preference editing, fixture discovery, draft review and application status changes. The mobile viewport had no horizontal overflow and no JavaScript page errors occurred. External requests and notification delivery were blocked/mocked for this check.
-- Read-only live provider checks returned 10 Arbeitnow records, 10 Remotive records and 30 Greenhouse records. Jobicy returned zero records. These checks establish provider responses, not sufficient India/Gulf coverage.
-- Dependency consistency (`python -m pip check`), dashboard JavaScript syntax and Git whitespace checks passed.
+## Confirmed fixes
 
-Test command (the URL points only to the disposable local test database):
+- Owner authentication now protects job links, tracking status, preferences, source reports, readiness and database diagnostics. Public health reports only liveness metadata; it no longer queries the private database/profile.
+- Dashboard data loads after authentication, handles Google-session deep links, clears all candidate content on logout/expired authentication, and rejects stale in-flight responses. Latest job filters win; coverage uses full aggregates rather than a capped list.
+- Gmail consent revocation cannot remain falsely connected. Failed refreshes never reuse expired access tokens. Configuration errors, revoked grants and transient outages are distinguished without leaking credentials. Callback defaults target the active service; cancelled consent returns to Connections.
+- Google credential verification runs outside the async event loop. Malformed OAuth payloads and Unicode authentication input fail safely.
+- Email-relative posting ages are anchored to each message's receipt time. Per-link city/age context avoids borrowing evidence from another listing. Bounded recent-mail pagination reports incomplete coverage; parse failures remain retryable, and message acknowledgements commit with job persistence.
+- Greenhouse ranks relevant jobs before caps and does not treat edits as new postings. Distinct requisitions sharing a title/employer/city are preserved; stable IDs/canonical URLs deduplicate genuine repeats. Provider cancellation no longer leaks unawaited coroutine objects.
+- Atomic application-attempt creation and browser claims prevent duplicate workers. Browser setup/navigation failures become retryable and close partial resources. Unknown required controls block form readiness.
+- Conditional outreach edit/approval writes cannot overwrite in-flight sends. Sender changes invalidate approvals while preserving unsent draft edits. Concurrent draft creation handles uniqueness conflicts.
+- GitHub Actions replaces the expired n8n discovery schedule using signed short-lived OIDC identities scoped to immutable repository/owner IDs, main branch, exact workflow, audience, issuer and time bounds. It cannot access private profile APIs. Ambiguous POST failures are not automatically retried.
+- Docker uses exec to forward shutdown signals to Uvicorn.
 
-```bash
-ENABLE_SCHEDULER=false DATABASE_PATH=/tmp/job-hunter-release-check.sqlite \
-PYTHONDONTWRITEBYTECODE=1 \
-TEST_POSTGRES_URL='postgresql://postgres@127.0.0.1:55432/job_hunter_test?sslmode=disable' \
-/workspace/job-hunter-venv/bin/python -m pytest -q -p no:cacheprovider
-```
+## Cleanup
 
-CI now provisions its own disposable PostgreSQL service. The regression tests and schema migration are included in this working tree; no remote CI run is claimed.
+Removed the obsolete native-Python render.yaml Blueprint and BROWSER_WORKER_SETUP.md migration guide, which encouraged duplicate services and described unsupported submission flows. Consolidated supported setup into README.md/RUNBOOK.md; replaced historical verification claims with this report. CI definitions/operator documents are excluded from the production image. Runtime modules, tests, SQL migrations and the migration utility have current uses and were retained.
 
-## Required before calling the real service operational
+## Local validation
 
-The cloud runtime has no configured WhatsApp, SerpApi, private portal or database credentials. No Render deployment connector/credentials were available. The owner's real PDF resume/profile were not provided. Follow RUNBOOK.md to configure or confirm existing secure service values and deploy these repository changes to the existing service.
+203 tests passed; two disposable-PostgreSQL tests skipped because TEST_POSTGRES_URL was not configured locally. Python dependency consistency, JavaScript syntax and git whitespace checks passed. New tests use fixture mail/providers and generated test signing keys; no recruiter emails or job applications were sent by these tests.
 
-Actual WhatsApp delivery, authenticated SerpApi searches, Google OAuth, production database migration and live Render deployment have not been verified. Do not infer these from fixture tests. No applications were submitted, no WhatsApp messages were sent, and no environment was published during implementation.
+The expanded browser smoke could not launch Chromium in this executor because its singleton socket/ptrace operations were denied. GitHub CI provisions PostgreSQL and runs the browser smoke; its result must be checked before deployment. CI/deployment results are reported in the pull request and session rather than inferred from local tests.
 
-For an internal schedule, run one web worker/instance. Hunt coordination is process-local; multiple replicas need external orchestration and distributed coordination. WhatsApp currently sends new-job digests without a persistent delivery retry queue.
+## Operational limits
 
-## Email delivery change
-
-Email is the default notification channel using Resend over HTTPS. New tests cover missing configuration, no fallback to WhatsApp, API payloads, recipient validation, threshold filtering, provider failure reporting and secret redaction. The dashboard test action sends through the selected email channel. Recipient configuration is kept outside tracked source files. Actual Resend delivery and live Render deployment remain unverified until credentials are supplied and the code is deployed.
-
-Email-update acceptance: 99 tests passed, with the disposable PostgreSQL test skipped because TEST_POSTGRES_URL was not configured for this run. The earlier PostgreSQL bootstrap verification remains recorded above. Chromium workflow checks, JavaScript syntax, dependency consistency and whitespace checks passed after the email change. No real email was sent. Recipient and Resend credential requirements were saved to the cloud configuration draft; this does not deploy or configure the live Render service.
-
-Lever setup update: 102 tests passed and the PostgreSQL-only test was skipped in this run. Regression checks cover verified default boards, relevant-role ranking before result limits and removal of stale missing-configuration messages. Meesho and Lalamove public endpoints returned HTTP 200. Gmail live setup remains blocked on the owner creating/configuring Google OAuth credentials and granting account consent.
-
-## Reviewed outreach and frontend redesign
-
-The new frontend has Job matches, Recruiter outreach, Applications, Connections and Profile & rules views. Static assets are served by FastAPI. Chromium fixture acceptance covers job/profile/PDF flows, the tracker, Apollo search/reveal, professional contact review, explicit approval and mocked Gmail sending across desktop and five mobile views. Screenshots are development fixtures, not real candidate/recruiter data.
-
-A deterministic PostgreSQL two-worker regression first reproduced duplicate outreach to one recipient; atomic recipient reservations now allow only one send. Additional checks cover owner/CSRF boundaries, actual Gmail scope storage, approval invalidation, daily caps, suppression, retained unsubscribe links, ambiguous outcomes and saved Apollo-contact reuse. No real contacts were enriched and no recruiter email was sent. Live Apollo access and Gmail sending remain gated on the owner secure key and Google consent.
-
-Final local acceptance for the outreach/frontend change: 121 tests passed with real PostgreSQL enabled (including deterministic concurrent-recipient claims), no skips; one Starlette transport deprecation warning. The reusable Chromium smoke passed the redesigned desktop workflow and all five mobile views with no JavaScript errors or horizontal overflow. JavaScript syntax, dependency consistency, whitespace and secret-material checks passed. All Apollo/Gmail requests in these tests were fixtures; live sending remains unverified and requires owner configuration/consent.
+- SerpApi last returned HTTP 429. Code cannot create provider quota; coverage remains degraded until quota is available or the owner changes providers.
+- GitHub schedules can be delayed; public-repository schedules can stop after 60 days of inactivity. Check Actions when discovery stops. Keep the expired n8n workflow inactive to avoid duplicate hunts if its subscription is restored.
+- Render free-service sleep pauses in-process draft/outreach timers. Discovery wakes the service externally; uninterrupted draft preparation requires an always-running service.
+- Gmail scope consent and testing-mode token expiry remain controlled by Google. Reconnect when the private Connections panel reports revoked consent.
+- Browser assistance is a temporary dry run; automatic job-form submission remains disabled. Live Apollo/Gmail outreach still requires recipient verification and explicit email approval.
+- The legacy native-Python Render service was not deleted: available metadata does not establish that it has no unique credentials/data or remaining clients. No unrelated repository was removed.

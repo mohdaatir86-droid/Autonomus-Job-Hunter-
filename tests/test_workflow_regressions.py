@@ -43,7 +43,7 @@ def test_preferences_survive_reads(client):
         'target_countries': ['Canada'], 'target_titles': ['Warehouse Manager'],
     })
     assert response.status_code == 200
-    settings = client.get('/api/settings').json()
+    settings = client.get('/api/settings', headers=owner_headers()).json()
     assert settings['target_countries'] == ['Canada']
     assert settings['target_titles'] == ['Warehouse Manager']
 
@@ -70,7 +70,7 @@ def test_tracking_stays_consistent_and_applied_draft_is_preserved(client):
 
 def test_public_sources_hide_mailbox(client, monkeypatch):
     monkeypatch.setattr(main, 'get_gmail_status', lambda: {'connected': True, 'email': 'private@example.com'})
-    response = client.get('/api/sources')
+    response = client.get('/api/sources', headers=owner_headers())
     assert response.status_code == 200
     assert 'private@example.com' not in response.text
     assert client.get('/api/gmail/status').status_code == 401
@@ -82,7 +82,7 @@ def test_browser_cannot_submit_even_when_environment_requests_it(client, monkeyp
     result = asyncio.run(browser_worker.run_application_worker(1, dry_run=False))
     assert result['status'] == 'blocked'
     assert result['reason'] == 'submission_disabled'
-    assert client.get('/health').json()['browser_submit_enabled'] is False
+    assert client.get('/api/operational-readiness', headers=owner_headers()).json()['automatic_submission_enabled'] is False
 
 
 def test_oauth_start_requires_owner_and_callback_is_browser_bound(client, monkeypatch):
@@ -137,7 +137,7 @@ def test_preferences_filter_only_explicit_evidence(job, settings, expected):
 
 
 def test_posted_window_can_be_changed(client):
-    response = client.get('/api/jobs?posted_within_days=7')
+    response = client.get('/api/jobs?posted_within_days=7', headers=owner_headers())
     assert response.status_code == 200
 
 
@@ -183,7 +183,7 @@ def test_tracked_application_remains_visible_after_posting_expires(client):
     job_id = insert_job()
     with job_hunter.connect() as db:
         db.execute("UPDATE jobs SET posted_at='2020-01-01T00:00:00+00:00',status='applied_manually' WHERE id=?",(job_id,))
-    assert len(client.get('/api/jobs?status=applied_manually').json()['items']) == 1
+    assert len(client.get('/api/jobs?status=applied_manually', headers=owner_headers()).json()['items']) == 1
 
 
 def text_pdf(text):
@@ -215,7 +215,7 @@ def test_complete_discovery_profile_draft_and_tracking(client, monkeypatch):
     hunt=client.post('/api/hunt',headers=owner_headers()).json()
     assert hunt['new_jobs']==2
     assert len(sent)==2
-    items=client.get('/api/jobs').json()['items']
+    items=client.get('/api/jobs', headers=owner_headers()).json()['items']
     assert {job['country'] for job in items}=={'India','Bahrain'}
     assert client.post('/api/profile',headers=owner_headers(),json={'full_name':'Fixture Candidate','email':'fixture@example.com','experience_summary':'Led multi-site warehouse operations.'}).status_code==200
     upload=client.post('/api/profile/resume',headers=owner_headers(),files={'file':('resume.pdf',text_pdf('Fixture Candidate warehouse operations manager'), 'application/pdf')})
@@ -229,7 +229,7 @@ def test_complete_discovery_profile_draft_and_tracking(client, monkeypatch):
     drafts=client.get('/api/applications',headers=owner_headers()).json()['items']
     assert 'Fixture Candidate' in drafts[0]['cover_letter']
     assert client.post(f"/api/applications/{drafts[0]['id']}/status",headers=owner_headers(),json={'status':'applied_manually'}).status_code==200
-    assert client.get('/api/jobs?status=applied_manually').json()['items'][0]['status']=='applied_manually'
+    assert client.get('/api/jobs?status=applied_manually', headers=owner_headers()).json()['items'][0]['status']=='applied_manually'
 
 
 @pytest.mark.parametrize('value',[[],{},None,123])

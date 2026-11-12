@@ -42,24 +42,24 @@ Set `SERPAPI_API_KEY` securely to enable Google Jobs searches tailored to your s
 
 Optional `GREENHOUSE_BOARDS` and `LEVER_SITES` configure employer board slugs. Empty LEVER_SITES uses the verified public Meesho and Lalamove boards; custom slugs replace those defaults. Candidates are ranked for the saved markets and operations fit before applying each board limit. Gmail alerts are optional: set Google OAuth client ID/secret, enable Gmail API and register the exact callback URL. Save your profile email, then click **Connect Gmail job alerts** in the authenticated dashboard. Connect the same Gmail account as the profile. OAuth state is browser-bound and single-use. Google sign-in and Gmail access are separate features.
 
-Required outbound HTTPS hosts depend on enabled providers: `www.arbeitnow.com`, `remotive.com`, `jobicy.com`, `boards-api.greenhouse.io`, optionally `api.lever.co`, `serpapi.com`, `api.resend.com` for email (legacy WhatsApp uses `api.callmebot.com` or `api.twilio.com`); Google flows additionally use `accounts.google.com`, `oauth2.googleapis.com`, `gmail.googleapis.com` and Google's token-verification certificate endpoints. Keep the platform proxy and TLS verification enabled.
+GitHub OIDC verification additionally needs `token.actions.githubusercontent.com`. Required outbound HTTPS hosts depend on enabled providers: `www.arbeitnow.com`, `remotive.com`, `jobicy.com`, `boards-api.greenhouse.io`, optionally `api.lever.co`, `serpapi.com`, `api.resend.com` for email (legacy WhatsApp uses `api.callmebot.com` or `api.twilio.com`); Google flows additionally use `accounts.google.com`, `oauth2.googleapis.com`, `gmail.googleapis.com` and Google's token-verification certificate endpoints. Keep the platform proxy and TLS verification enabled.
 
 ## Scheduling
 
 Set `ENABLE_SCHEDULER=true` for automatic discovery and draft preparation. Set `HUNT_INTERVAL_MINUTES=360` for six-hour discovery. Preparation runs every 30 minutes only after the profile is complete and the dashboard's draft policy is enabled. Already prepared/actioned jobs are excluded before selecting each batch.
 
-If n8n owns discovery, set `ENABLE_INTERNAL_HUNT_SCHEDULER=false`; use its separate 32+ character `N8N_AUTOMATION_TOKEN` with POST `/api/integrations/n8n/hunt`. Never run duplicate schedules. For the internal scheduler, use a single web worker/instance; the hunt lock is process-local. Multiple replicas need a shared external scheduler and distributed hunt coordination.
+Production discovery uses `.github/workflows/discovery.yml` every six hours. It authenticates to POST `/api/integrations/github/hunt` with short-lived GitHub OIDC tokens scoped to the exact repository and main workflow; no persistent secret is stored in Actions. Keep `ENABLE_INTERNAL_HUNT_SCHEDULER=false` and leave the old n8n workflow inactive. GitHub schedules may be delayed or disabled after 60 days of repository inactivity. If choosing n8n instead, disable the GitHub workflow and use its separate 32+ character `N8N_AUTOMATION_TOKEN` with POST `/api/integrations/n8n/hunt`. Never run duplicate schedules. For the internal scheduler, use a single web worker/instance; the hunt lock is process-local. Multiple replicas need a shared external scheduler and distributed hunt coordination.
 
 ## Database and deployment
 
-Use the existing Render service; do not create a second service from the legacy `render.yaml`. The Dockerfile installs Python dependencies and includes bundled PostgreSQL migrations. PostgreSQL startup applies additive SQL files in `migrations/` under a transaction/advisory lock. The database role needs schema creation/alter privileges for first startup. Back up existing production data before deployment. The SQLite-to-PostgreSQL copier expects a bootstrapped target schema; initialize it using `database.initialize_database_schema()` before copying. Copying into a nonempty destination does not reconcile conflicting primary keys: use an empty target or plan an explicit data reconciliation.
+Use the existing Docker Render service `autonomous-job-hunter-docker`; no native-Python Blueprint is maintained. The Dockerfile installs Python dependencies and includes bundled PostgreSQL migrations. PostgreSQL startup applies additive SQL files in `migrations/` under a transaction/advisory lock. The database role needs schema creation/alter privileges for first startup. Back up existing production data before deployment. The SQLite-to-PostgreSQL copier expects a bootstrapped target schema; initialize it using `database.initialize_database_schema()` before copying. Copying into a nonempty destination does not reconcile conflicting primary keys: use an empty target or plan an explicit data reconciliation.
 
-Production endpoints that change state require owner authentication, except the separately authenticated n8n route and Google session callback. Gmail status, OAuth initiation and browser health are also private. Gmail initiation now uses POST `/api/gmail/auth`, returning the authorization URL as JSON; update any old GET-based integration.
+All workspace API reads and mutations require owner authentication. Exceptions are the separately authenticated n8n/GitHub discovery routes, minimal authentication configuration/session endpoints, and state-verified OAuth callbacks. Gmail status, OAuth initiation and browser health are also private. Gmail initiation now uses POST `/api/gmail/auth`, returning the authorization URL as JSON; update any old GET-based integration.
 
 After deployment, verify:
 
-- `/health` returns healthy and `browser_submit_enabled=false`.
-- `/health/db` returns `ok=true`, `connected=true`, and no missing tables.
+- `/health` returns minimal liveness metadata without private configuration. Authenticated `/api/operational-readiness` reports automatic submission disabled.
+- Authenticated `/health/db` returns `ok=true`, `connected=true`, and no missing tables.
 - Unauthenticated POST `/api/settings`, `/api/hunt`, and `/api/notify/test` are denied.
 - Authenticated `/api/setup` reports profile readiness and provider configuration without exposing credentials.
 - A manual hunt reports successful sources and useful results; provider outages are separate from application health.
@@ -93,3 +93,11 @@ An OAuth client cannot be created or consented to using the Resend key. The Goog
 ## New workspace and recruiter outreach
 
 See [OUTREACH.md](OUTREACH.md) for the redesigned frontend, Apollo integration, Gmail sending permission and approval/queue controls. These are separate from self-alert emails and read-only job-alert ingestion.
+
+## Browser assistance
+
+The existing Dockerfile includes Chromium and pins Playwright to the matching image version. Do not create another Render service to enable it. Set `BROWSER_WORKER_ENABLED=true` only for dry-run assistance, and keep `BROWSER_ALLOW_SUBMIT=false`. Authenticated `/health/browser` checks Chromium availability. Required unknown fields, legal declarations, CAPTCHA, OTP and login walls block readiness. Browser contexts close after the dry run; prepared field values are not a persistent session for later submission. Login-required boards remain discovery-only.
+
+## Repository cleanup policy
+
+Keep runtime modules, regression tests, PostgreSQL migrations, the SQLite migration utility and focused operating guides. They all have current uses. Obsolete native-Python deployment instructions have been removed. Treat the separate LinkedIn Autonomous, Product Hunter and crypto repositories as independent projects; they are not disposable Job Hunter duplicates. The old native-Python Render service must not be deleted until the owner confirms it holds no unique environment configuration or data and has no remaining consumers.

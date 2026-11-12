@@ -74,7 +74,7 @@ def build_search_queries(settings):
     return queries
 
 
-def _parse_iso(value):
+def _parse_iso(value, reference_time=None):
     if value is None or value == "":
         return None
     if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().isdigit()):
@@ -101,7 +101,7 @@ def _parse_iso(value):
             delta = timedelta(days=count)
         else:
             delta = timedelta(hours=count)
-        return (datetime.now(timezone.utc) - delta).isoformat()
+        return ((reference_time or datetime.now(timezone.utc)) - delta).isoformat()
 
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -436,6 +436,7 @@ BUILTIN_GREENHOUSE_BOARDS = ("careem", "flexport", "instacart")
 async def fetch_greenhouse(client, limit):
     configured = [b.strip() for b in os.getenv("GREENHOUSE_BOARDS", "").split(",") if b.strip()]
     boards = configured or list(BUILTIN_GREENHOUSE_BOARDS)
+    settings = get_settings()
     out, errors = [], []
     per_board = max(10, min(40, limit))
     for board in boards[:15]:
@@ -446,7 +447,8 @@ async def fetch_greenhouse(client, limit):
                 params={"content": "true"},
             )
             jobs = data.get("jobs") or []
-            for raw in jobs[:per_board]:
+            candidates = []
+            for raw in jobs:
                 loc = ""
                 if isinstance(raw.get("location"), dict):
                     loc = raw["location"].get("name") or ""
@@ -457,12 +459,18 @@ async def fetch_greenhouse(client, limit):
                     "url": raw.get("absolute_url") or "",
                     "description": raw.get("content") or "",
                     "id": str(raw.get("id") or ""),
-                    "date": raw.get("updated_at") or raw.get("created_at"),
+                    "date": raw.get("first_published") or raw.get("created_at"),
                 }
                 job = _clean_job(normalized, f"Greenhouse/{board}")
                 if job:
                     job["_board_complete"] = len(jobs) <= per_board
-                    out.append(job)
+                    candidates.append(job)
+            candidates.sort(key=lambda job: (
+                job["country"] in settings["target_countries"] and matches_preferences(job, settings),
+                score_job(job, settings)[0],
+                job.get("posted_at") or "",
+            ), reverse=True)
+            out.extend(candidates[:per_board])
         except Exception as e:
             summary = _safe_source_error(e)
             log.warning("Greenhouse board %s failed: %s", board, summary)
@@ -532,13 +540,13 @@ async def fetch_public_sources(settings):
             errors.append(name + ": " + detail)
 
     async with httpx.AsyncClient(headers={"User-Agent": "AutonomousJobHunter/0.6"}) as client:
-        for name, coro in [
-            ("Arbeitnow", fetch_arbeitnow(client, limit)),
-            ("Remotive", fetch_remotive(client, limit)),
-            ("Jobicy", fetch_jobicy(client, limit)),
+        for name, fetcher in [
+            ("Arbeitnow", fetch_arbeitnow),
+            ("Remotive", fetch_remotive),
+            ("Jobicy", fetch_jobicy),
         ]:
             try:
-                jobs = await coro
+                jobs = await fetcher(client, limit)
                 results.extend(jobs)
                 add_report(name, jobs, None)
             except Exception as e:
@@ -591,14 +599,15 @@ def _find_existing_job(conn, job, normalized_url):
     ).fetchone()
     if existing:
         return existing
-    title = normalize_text(job.get("title")).lower()
-    company = normalize_text(job.get("company")).lower()
-    location = normalize_text(job.get("location")).lower()
-    if not title or not company:
+    source = normalize_text(job.get("source"))
+    source_id = normalize_text(job.get("source_id"))
+    if not source or not source_id:
         return None
+    # Employers can publish several requisitions with the same title and city.
+    # Only provider identity or the canonical URL establishes a duplicate.
     return conn.execute(
-        "SELECT id, url FROM jobs WHERE lower(title)=? AND lower(COALESCE(company,''))=? AND lower(COALESCE(location,''))=?",
-        (title, company, location),
+        "SELECT id, url FROM jobs WHERE source=? AND source_id=?",
+        (source, source_id),
     ).fetchone()
 
 
@@ -735,6 +744,13 @@ async def _hunt_jobs_locked():
                         (now_iso(), row["id"]),
                     )
                     closed += 1
+        # Acknowledge imported Gmail messages in the same transaction as their
+        # jobs. A failed write must leave the messages eligible for a retry.
+        for message_id in {job["_gmail_message_id"] for job in fetched if job.get("_gmail_message_id")}:
+            conn.execute(
+                "INSERT OR IGNORE INTO gmail_seen_messages(message_id, seen_at) VALUES (?,?)",
+                (message_id, now_iso()),
+            )
         conn.execute(
             "INSERT INTO hunt_runs(started_at,finished_at,sources_checked,fetched,new_jobs,errors) VALUES (?,?,?,?,?,?)",
             (started, now_iso(), len(reports), len(fetched), inserted, json.dumps(errors)),

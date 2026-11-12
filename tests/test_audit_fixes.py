@@ -176,19 +176,20 @@ def test_health_and_db(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     import main
 
+    monkeypatch.setenv("PORTAL_ACCESS_TOKEN", "fixture-audit-owner-key-" * 3)
+    headers = {"Authorization": "Bearer " + "fixture-audit-owner-key-" * 3}
     with TestClient(main.app) as client:
         health = client.get("/health")
         assert health.status_code == 200
         body = health.json()
         assert body["status"] == "ok"
         assert body["version"] == "0.6.0"
-        assert body["live_applications_enabled"] is False
-        assert body["browser_submit_enabled"] is False
-        db_health = client.get("/health/db")
+        assert set(body) == {"status", "service", "version", "time"}
+        db_health = client.get("/health/db", headers=headers)
         assert db_health.status_code == 200
         assert db_health.json()["connected"] is True
         assert db_health.json()["missing_tables"] == []
-        settings = client.get("/api/settings")
+        settings = client.get("/api/settings", headers=headers)
         assert settings.status_code == 200
         assert settings.json()["target_countries"] == job_hunter.DEFAULT_COUNTRIES
         assert "Program Manager" in settings.json()["target_titles"]

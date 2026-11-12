@@ -166,6 +166,14 @@ def create_draft(contact_id, job_id):
         job = _job(db,job_id)
         existing = db.execute('SELECT * FROM outreach_drafts WHERE candidate_id=? AND contact_id=? AND job_id=?',(CANDIDATE_ID,contact_id,job_id)).fetchone()
         if existing:
+            if existing['sender_email'] != sender and existing['state'] in {'draft','approved','failed'}:
+                # A new sender requires renewed review, while retaining the owner's edits
+                # and the existing opt-out capability.
+                changed = db.execute("UPDATE outreach_drafts SET sender_email=?,body=?,state='draft',approval_hash='',updated_at=? WHERE id=? AND state IN ('draft','approved','failed') AND updated_at=?",
+                    (sender,existing['body'].replace(existing['sender_email'],sender),timestamp,existing['id'],existing['updated_at']))
+                if changed.rowcount != 1:
+                    raise HTTPException(409,'This draft changed concurrently. Reload before preparing it again.')
+                return _row(db,'outreach_drafts',existing['id'])
             return dict(existing)
         token = secrets.token_urlsafe(32)
         db.execute('INSERT INTO outreach_unsubscribe_tokens(token_hash,contact_id) VALUES (?,?)',(hashlib.sha256(token.encode()).hexdigest(),contact_id))
@@ -181,7 +189,7 @@ def create_draft(contact_id, job_id):
         body += f"Are you the right person to speak with about this role, or could you direct me to the hiring team? I can share my resume on request.\n\nRegards,\n{profile['full_name']}\n{sender}\n\nIf you prefer no further job enquiries from me, you can opt out here:\n{base}/outreach/unsubscribe?token={token}"
         subject = f"Application enquiry: {job['title']} — {profile['full_name']}".replace('\r',' ').replace('\n',' ')[:200]
         db.execute('''INSERT INTO outreach_drafts(candidate_id,contact_id,job_id,sender_email,recipient_email,subject,body,created_at,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?)''',(CANDIDATE_ID,contact_id,job_id,sender,contact['email'],subject,body,timestamp,timestamp))
+            VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(candidate_id,contact_id,job_id) DO NOTHING''',(CANDIDATE_ID,contact_id,job_id,sender,contact['email'],subject,body,timestamp,timestamp))
         return dict(db.execute('SELECT * FROM outreach_drafts WHERE candidate_id=? AND contact_id=? AND job_id=?',(CANDIDATE_ID,contact_id,job_id)).fetchone())
 
 
@@ -209,7 +217,9 @@ def approve_draft(draft_id,payload):
         job = _job(db,draft['job_id'])
         _eligible(draft,contact,profile)
         fingerprint = _fingerprint(draft,contact,profile,job)
-        db.execute("UPDATE outreach_drafts SET state='approved',approval_hash=?,error='',updated_at=? WHERE id=?",(fingerprint,now(),draft_id))
+        changed = db.execute("UPDATE outreach_drafts SET state='approved',approval_hash=?,error='',updated_at=? WHERE id=? AND state IN ('draft','approved','failed') AND updated_at=?",(fingerprint,now(),draft_id,draft['updated_at']))
+        if changed.rowcount != 1:
+            raise HTTPException(409,'This draft changed concurrently. Reload and review it again.')
         return _row(db,'outreach_drafts',draft_id)
 
 
@@ -226,7 +236,9 @@ def edit_draft(draft_id,payload):
         link = re.search(r'https://[^\s]+/outreach/unsubscribe\?token=[\w-]+',draft['body'])
         if link and link.group(0) not in body:
             body += '\n\nStop further enquiries: '+link.group(0)
-        db.execute("UPDATE outreach_drafts SET subject=?,body=?,state='draft',approval_hash='',updated_at=? WHERE id=?",(subject,body,now(),draft_id))
+        changed = db.execute("UPDATE outreach_drafts SET subject=?,body=?,state='draft',approval_hash='',updated_at=? WHERE id=? AND state IN ('draft','approved','failed') AND updated_at=?",(subject,body,now(),draft_id,draft['updated_at']))
+        if changed.rowcount != 1:
+            raise HTTPException(409,'This draft changed concurrently. Sent or in-flight emails cannot be edited.')
         return _row(db,'outreach_drafts',draft_id)
 
 
