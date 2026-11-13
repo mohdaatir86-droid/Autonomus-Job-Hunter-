@@ -43,3 +43,14 @@ python tests/browser_smoke.py
 ```
 
 All test emails, recipients, Apollo responses and Gmail messages are fixtures. PostgreSQL tests require a disposable `TEST_POSTGRES_URL` ending in `_test`; never use production. Browser smoke covers the campaign preview and iPhone widths. API keys, granted live Gmail scopes, actual Apollo eligibility and real recipient previews must be checked privately; tests do not establish them.
+
+
+## Prospeo alternative
+
+Set `PROSPEO_API_KEY` only in the existing Render service's secure environment settings; no key is stored in the browser or repository. Choose Prospeo in Recruiter outreach. A missing key, plan restriction, exhausted credits or rate limit is a blocked action, not a successful connection. No account or paid plan is created automatically. The free plan has limited API access and may restrict non-business registration addresses; eligibility remains account-specific.
+
+Search uses the documented `/search-person` endpoint, one page for an exact employer website and hiring titles. It can charge one credit per returned page. Only names, hiring titles and matched current employers are shortlisted. Revealing calls `/enrich-person` with verified-email-only and mobile enrichment disabled, with an additional credit confirmation. Person ID, current company, hiring title and employer email domain must match before storage; contacts still require responsibility review before approval.
+
+Searches and reveals reserve the shared database-backed daily/monthly lookup budget (defaults 5/day, 50/month), including Apollo reveals. Prospeo search cache and namespaced reservations persist across restarts. Repeated or concurrent requests never repeat an ambiguous provider operation automatically. A cached search is explicitly dated and must be checked for current employment. Provider-side deduplication can lower the actual charge; local limits conservatively count attempted lookups. Search results never contain emails or phone numbers. No change to sending approvals, global pause, Gmail OAuth or PDF requirements.
+
+Tests: `python -m pytest -q tests/test_prospeo.py`; the fixture browser flow uses mocked Prospeo and Gmail only. Live access remains unverified until a key and eligible account are configured. Never spend provider credits merely to test.

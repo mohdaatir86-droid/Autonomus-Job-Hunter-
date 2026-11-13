@@ -7,6 +7,7 @@ import outreach
 import gmail_alerts
 import outreach_engine as engine
 import resume_store
+import prospeo_provider
 from fastapi.responses import Response
 
 router=APIRouter()
@@ -14,7 +15,7 @@ router=APIRouter()
 @router.get('/api/outreach/status')
 def status():
     gmail=gmail_alerts.get_gmail_status()
-    return {'apollo_configured':bool(os.getenv('APOLLO_API_KEY','').strip()),'gmail':{key:gmail.get(key) for key in ['connected','oauth_configured','send_authorized']},'policy':outreach.policy(),'review_required':True,'automatic_followups':True,'resume':resume_store.get(),'rules':engine.settings(),'scheduler_enabled':os.getenv('ENABLE_SCHEDULER','true').lower()=='true'}
+    return {'prospeo_configured':prospeo_provider.configured(),'apollo_configured':bool(os.getenv('APOLLO_API_KEY','').strip()),'gmail':{key:gmail.get(key) for key in ['connected','oauth_configured','send_authorized']},'policy':outreach.policy(),'review_required':True,'automatic_followups':True,'resume':resume_store.get(),'rules':engine.settings(),'scheduler_enabled':os.getenv('ENABLE_SCHEDULER','true').lower()=='true'}
 
 @router.get('/api/outreach/contacts')
 def contacts():return {'items':outreach.list_records('outreach_contacts')}
@@ -117,3 +118,10 @@ async def replies():return await engine.sync_replies()
 
 @router.post('/api/outreach/prepare-batch')
 def prepare_batch(payload:dict):return engine.prepare_batch(payload)
+
+
+@router.post('/api/outreach/prospeo/search')
+async def prospeo_search(payload:dict):return await prospeo_provider.search(payload)
+
+@router.post('/api/outreach/prospeo/enrich')
+async def prospeo_enrich(payload:dict):return await prospeo_provider.enrich(payload)
