@@ -45,6 +45,12 @@
   <section id="tab-outreach" style="display:none">
     <div class="panel"><div class="panel-header"><div><div class="panel-title">Outreach campaigns</div><div class="panel-sub">Review a finite batch of exact emails, attachments and follow-ups before activation.</div></div><button class="btn btn-ghost btn-sm" onclick="stopAllOutreach()">Stop all outreach</button></div><div class="panel-body">
       <div id="campaignMetrics" class="coverage-grid"></div><p id="campaignProfile" class="profile-note"></p><p id="campaignResume" class="profile-note"></p><p id="campaignTargets" class="profile-note"></p>
+      <details><summary>Ongoing international job search</summary>
+        <p class="profile-note">Runs daily until you pause it or confirm a job. Research uses the shared provider budget. Only reviewed contacts become draft introductions; every email batch still needs your approval. Existing send limits, company history and suppression remain in force. Free hosting can delay runs until wake.</p>
+        <label class="profile-field">Target employers — company | verified domain | evidence URL<textarea id="programTargets" rows="5" spellcheck="false"></textarea></label>
+        <div class="profile-actions"><button class="btn btn-primary btn-sm" onclick="saveResearchProgram(true)">Start daily research &amp; drafts</button><button class="btn btn-ghost btn-sm" onclick="saveResearchProgram(false)">Pause daily research</button><button class="btn btn-ghost btn-sm" onclick="runResearchProgram()">Research now</button><button class="btn btn-ghost btn-sm" onclick="jobSearchCompleted()">I got a job — stop outreach</button></div>
+        <p id="programStatus" class="profile-note" role="status"></p><div id="programShortlists"></div>
+      </details>
       <details><summary>Sending hours, follow-ups and provider budget</summary><div class="profile-grid" style="margin-top:14px">
       <label class="profile-field"><span>Global pause</span><span><input id="rule_paused" type="checkbox" checked> Pause all email sending</span></label>
       <label class="profile-field">Daily reset timezone<input id="rule_timezone" value="Asia/Kolkata"></label>

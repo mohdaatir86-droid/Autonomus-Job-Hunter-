@@ -72,6 +72,9 @@ def initialize():
         db.execute('CREATE UNIQUE INDEX IF NOT EXISTS outreach_followup_once ON outreach_drafts(parent_id,step_number)')
         db.execute('CREATE UNIQUE INDEX IF NOT EXISTS outreach_campaign_contact_once ON outreach_drafts(contact_id,campaign_id) WHERE step_number=0 AND campaign_id IS NOT NULL')
         db.execute('CREATE TABLE IF NOT EXISTS outreach_settings(id INTEGER PRIMARY KEY CHECK(id=1), settings TEXT NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS outreach_program(id INTEGER PRIMARY KEY CHECK(id=1), settings TEXT NOT NULL)')
+        import outreach_program
+        db.execute('INSERT INTO outreach_program(id,settings) VALUES (1,?) ON CONFLICT(id) DO NOTHING',(json.dumps(outreach_program.DEFAULT),))
         db.execute('INSERT INTO outreach_settings(id,settings) VALUES (1,?) ON CONFLICT(id) DO NOTHING',(json.dumps(DEFAULTS),))
         db.execute(f'''CREATE TABLE IF NOT EXISTS outreach_campaigns(id {identity}, name TEXT NOT NULL,
             kind TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'draft', approval_hash TEXT NOT NULL DEFAULT '',
@@ -129,6 +132,11 @@ def save_settings(payload):
 def global_stop():
     save_settings({'paused':True})
     with connect() as db:
+        import outreach_program
+        outreach_program.lock(db)
+        program = outreach_program.get(db)
+        program['enabled'] = False
+        outreach_program.write(db, program)
         db.execute("UPDATE outreach_campaigns SET state='paused',updated_at=? WHERE state='active'",(stamp(),))
         db.execute("UPDATE outreach_drafts SET state='draft',approval_hash='',updated_at=? WHERE state='approved'",(stamp(),))
     return {'paused':True,'message':'Queued approvals cleared. In-flight Gmail requests cannot be recalled.'}
@@ -401,10 +409,12 @@ async def tick():
         if row.rowcount!=1:return {'skipped':'Another outreach worker is active.'}
         db.execute("UPDATE outreach_drafts SET state='delivery_unknown',error='Worker interrupted; check Gmail Sent. No automatic retry.' WHERE state='sending' AND updated_at<?",((utcnow()-timedelta(minutes=10)).isoformat(),))
     try:
-        if settings()['paused']:return {'skipped':'Outreach paused globally.'}
+        import outreach_program
+        research = await outreach_program.tick()
+        if settings()['paused']:return {'skipped':'Outreach paused globally.','research':research}
         reply_result=await sync_replies()
         # No read permission means no follow-up dispatch; first-contact reviewed emails can still be sent.
-        return await outreach.dispatch_approved(followups_allowed=not reply_result.get('blocked'),checked_roots=reply_result.get('root_ids',[]))
+        return {**await outreach.dispatch_approved(followups_allowed=not reply_result.get('blocked'),checked_roots=reply_result.get('root_ids',[])), 'research':research}
     finally:
         with connect() as db:db.execute("DELETE FROM outreach_leases WHERE name='tick' AND owner=?",(owner,))
 

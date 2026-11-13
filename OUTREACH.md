@@ -27,6 +27,14 @@ The existing FastAPI/Render service serves the private dashboard and outreach AP
 
 ## Scheduling and recovery
 
+### Ongoing international research
+
+The private `/api/outreach/program` settings persist in the same database. The dashboard starts with evidenced noon, talabat and Careem employer domains. This opt-in programme makes at most one Prospeo company search per local day under the existing shared lookup caps. It rotates the explicitly listed employers, dates cached shortlists and never guesses emails, enriches a person automatically, approves a batch or sends email. Reveal and verify relevant contacts using the existing controls. Reviewed, unsuppressed contacts at listed employers can become draft-only introductions, with one initial company draft across campaign history. Previously contacted companies are not repeatedly mailed. Add evidenced target companies to broaden research; the programme does not expand its scope silently.
+
+The programme runs from the existing outreach tick (including authenticated discovery wakes), independently of the send-only pause. A persistent daily reservation and database lease prevent overlapping or restarted workers from repeating provider attempts. Failed or interrupted calls remain visible and are not blindly retried. Pausing daily research stops future research; Global stop disables research and revokes queued sending approvals. **I got a job** persists the stop until the owner explicitly restarts. An offer or interview is never treated as proof the user has secured a job.
+
+New profile/PDF versions continue to invalidate email approvals. Previously prepared drafts retain their old attachment hash and remain blocked until the current PDF is attached and the exact content is reviewed again. The ongoing programme does not grant permission for conversational replies or remove finite batch approval.
+
 The web scheduler runs one outreach tick per minute while awake. The existing authenticated GitHub discovery route also schedules a bounded background outreach tick after discovery; its OIDC authorization scope is unchanged, and no public sending route was added. Keep the obsolete n8n discovery workflow inactive. Database leases prevent overlapping outreach passes.
 
 Free Render sleep still delays processing until the next wake. Due times, campaign approvals, reservations, replies, suppressions and PDF bytes persist in the configured durable database. A GitHub wake is six-hourly, so free hosting does not guarantee minute-accurate delivery or immediate reply synchronization. Follow-ups recheck Gmail before dispatch after waking. An always-running service is needed for continuous processing; no paid plan is selected automatically.
