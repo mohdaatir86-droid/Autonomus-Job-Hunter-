@@ -58,6 +58,9 @@ def init_outreach_db():
             token_hash TEXT PRIMARY KEY, contact_id INTEGER NOT NULL,
             FOREIGN KEY(contact_id) REFERENCES outreach_contacts(id))''')
 
+    import outreach_engine
+    outreach_engine.initialize()
+
 
 def _email(value):
     value = str(value or '').strip().lower()
@@ -102,7 +105,8 @@ def create_contact(payload):
             VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(candidate_id,email) DO NOTHING''',
             (CANDIDATE_ID,email,str(payload.get('name') or '')[:200],str(payload.get('company') or '')[:200],str(payload.get('title') or '')[:200],source,str(payload.get('apollo_id') or '')[:100],str(payload.get('email_status') or 'unverified')[:40],timestamp,timestamp))
         row = db.execute('SELECT * FROM outreach_contacts WHERE candidate_id=? AND email=?',(CANDIDATE_ID,email)).fetchone()
-        return _serialize(row)
+        db.execute('UPDATE outreach_contacts SET company_domain=? WHERE id=?',(str(payload.get('company_domain') or email.split('@')[1]).lower(),row['id']))
+        return _row(db,'outreach_contacts',row['id'])
 
 
 def verify_contact(contact_id, payload):
@@ -111,11 +115,16 @@ def verify_contact(contact_id, payload):
     note = str(payload.get('note') or '').strip()
     if len(note) < 15 or len(note) > 1000:
         raise HTTPException(422, 'Record a verification note of 15–1000 characters.')
+    zone = str(payload.get('timezone') or '').strip()
+    if zone:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try: ZoneInfo(zone)
+        except (ZoneInfoNotFoundError, ValueError): raise HTTPException(422,'Enter a valid recipient IANA timezone.')
     with connect() as db:
         contact = _row(db,'outreach_contacts',contact_id)
         if contact['suppressed']:
             raise HTTPException(409, 'This recipient is suppressed; do not contact them.')
-        db.execute('UPDATE outreach_contacts SET verified=1,verification_note=?,updated_at=? WHERE id=?',(note,now(),contact_id))
+        db.execute('UPDATE outreach_contacts SET verified=1,verification_note=?,timezone=?,updated_at=? WHERE id=?',(note,zone,now(),contact_id))
         return _row(db,'outreach_contacts',contact_id)
 
 
@@ -140,6 +149,8 @@ def save_policy(payload):
         raise HTTPException(422, 'Daily limit must be 1–20 and automatic sending must be a boolean.')
     with connect() as db:
         db.execute('UPDATE outreach_policy SET daily_limit=?,auto_send_approved=? WHERE id=1',(cap,int(enabled)))
+        if cap!=current['daily_limit'] or enabled!=bool(current['auto_send_approved']):
+            db.execute("UPDATE outreach_campaigns SET state='paused',approval_hash='',updated_at=? WHERE state='active'",(now(),))
     return policy()
 
 
@@ -153,52 +164,73 @@ def _job(db, job_id):
     return job
 
 
-def create_draft(contact_id, job_id):
+def create_draft(contact_id, job_id=None, *, campaign_id=None, target_company='', target_domain=''):
+    import outreach_engine as engine
+    import resume_store
     profile = get_profile_full()
     if not all(str(profile.get(key) or '').strip() for key in ['full_name','email','resume_text']):
         raise HTTPException(409,'Complete your private profile and PDF resume first.')
     sender = _email(profile['email'])
+    attachment = resume_store.get()
     timestamp = now()
     with connect() as db:
         contact = _row(db,'outreach_contacts',contact_id)
-        if contact['suppressed']:
-            raise HTTPException(409,'Recipient is suppressed.')
-        job = _job(db,job_id)
-        existing = db.execute('SELECT * FROM outreach_drafts WHERE candidate_id=? AND contact_id=? AND job_id=?',(CANDIDATE_ID,contact_id,job_id)).fetchone()
+        if contact['suppressed']:raise HTTPException(409,'Recipient is suppressed.')
+        campaign = None
+        if campaign_id:
+            campaign = db.execute('SELECT * FROM outreach_campaigns WHERE id=?',(campaign_id,)).fetchone()
+            if not campaign or campaign['state']=='active':raise HTTPException(409,'Select a draft or paused campaign; active scope cannot expand.')
+        kind = campaign['kind'] if campaign else 'vacancy'
+        if kind=='introduction':
+            target_company = str(target_company or contact['company']).strip()[:200]
+            target_domain = str(target_domain or contact['company_domain']).strip().lower()
+            if not target_company or target_domain!=contact['company_domain']:
+                raise HTTPException(422,'Choose the verified employer name and matching company domain.')
+            job_id=None
+            job={'company':target_company,'title':'future operations opportunities','description':'','url':'https://'+target_domain}
+            existing=db.execute('SELECT * FROM outreach_drafts WHERE contact_id=? AND campaign_id=? AND step_number=0',(contact_id,campaign_id)).fetchone()
+        else:
+            if type(job_id) is not int:raise HTTPException(422,'Choose a discovered vacancy.')
+            job = _job(db,job_id)
+            target_company,target_domain=job['company'],contact['company_domain']
+            if not job.get('url'):raise HTTPException(409,'The vacancy must have a source URL.')
+            existing=db.execute('SELECT * FROM outreach_drafts WHERE candidate_id=1 AND contact_id=? AND job_id=? AND step_number=0',(contact_id,job_id)).fetchone()
         if existing:
-            if existing['sender_email'] != sender and existing['state'] in {'draft','approved','failed'}:
-                # A new sender requires renewed review, while retaining the owner's edits
-                # and the existing opt-out capability.
-                changed = db.execute("UPDATE outreach_drafts SET sender_email=?,body=?,state='draft',approval_hash='',updated_at=? WHERE id=? AND state IN ('draft','approved','failed') AND updated_at=?",
-                    (sender,existing['body'].replace(existing['sender_email'],sender),timestamp,existing['id'],existing['updated_at']))
-                if changed.rowcount != 1:
-                    raise HTTPException(409,'This draft changed concurrently. Reload before preparing it again.')
+            if existing['campaign_id'] != campaign_id:raise HTTPException(409,'This opportunity already has an outreach draft; review its existing campaign.')
+            if existing['sender_email']!=sender and existing['state'] in {'draft','approved','failed'}:
+                changed=db.execute("UPDATE outreach_drafts SET sender_email=?,body=?,state='draft',approval_hash='',updated_at=? WHERE id=? AND state IN ('draft','approved','failed') AND updated_at=?",(sender,existing['body'].replace(existing['sender_email'],sender),timestamp,existing['id'],existing['updated_at']))
+                if changed.rowcount!=1:raise HTTPException(409,'Draft changed concurrently. Reload before preparing it again.')
                 return _row(db,'outreach_drafts',existing['id'])
             return dict(existing)
         token = secrets.token_urlsafe(32)
         db.execute('INSERT INTO outreach_unsubscribe_tokens(token_hash,contact_id) VALUES (?,?)',(hashlib.sha256(token.encode()).hexdigest(),contact_id))
         base = os.getenv('PORTAL_PUBLIC_URL','https://autonomous-job-hunter-docker.onrender.com').rstrip('/')
-        body = f"Hello {contact['name'] or 'Hiring Team'},\n\nI’m reaching out about the {job['title']} opportunity at {job['company'] or 'your organization'}.\n\n"
-        summary = str(profile.get('experience_summary') or profile.get('headline') or '').strip()
-        if summary:
-            body += summary[:900] + '\n\n'
-        text = (str(job.get('description') or '')+' '+job['title']).lower()
-        skills = [skill for skill in profile.get('skills',[]) if skill.lower() in text][:3]
-        if skills:
-            body += 'Relevant skills from my profile: '+', '.join(skills)+'.\n\n'
-        body += f"Are you the right person to speak with about this role, or could you direct me to the hiring team? I can share my resume on request.\n\nRegards,\n{profile['full_name']}\n{sender}\n\nIf you prefer no further job enquiries from me, you can opt out here:\n{base}/outreach/unsubscribe?token={token}"
-        subject = f"Application enquiry: {job['title']} — {profile['full_name']}".replace('\r',' ').replace('\n',' ')[:200]
-        db.execute('''INSERT INTO outreach_drafts(candidate_id,contact_id,job_id,sender_email,recipient_email,subject,body,created_at,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(candidate_id,contact_id,job_id) DO NOTHING''',(CANDIDATE_ID,contact_id,job_id,sender,contact['email'],subject,body,timestamp,timestamp))
-        return dict(db.execute('SELECT * FROM outreach_drafts WHERE candidate_id=? AND contact_id=? AND job_id=?',(CANDIDATE_ID,contact_id,job_id)).fetchone())
+        subject,body = engine.compose(profile,contact,job,kind,base+'/outreach/unsubscribe?token='+token)
+        if not attachment:body=body.replace('I’ve attached my resume.','I can share my resume on request.')
+        db.execute('''INSERT INTO outreach_drafts(candidate_id,contact_id,job_id,sender_email,recipient_email,subject,body,
+            campaign_id,resume_sha,target_company,target_domain,campaign_kind,created_at,updated_at)
+            VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING''',
+            (contact_id,job_id,sender,contact['email'],subject,body,campaign_id,attachment['sha256'] if attachment else '',target_company,target_domain,kind,timestamp,timestamp))
+        if job_id:
+            result=dict(db.execute('SELECT * FROM outreach_drafts WHERE contact_id=? AND job_id=? AND step_number=0',(contact_id,job_id)).fetchone())
+        else:
+            result=dict(db.execute('SELECT * FROM outreach_drafts WHERE contact_id=? AND campaign_id=? AND step_number=0 ORDER BY id DESC LIMIT 1',(contact_id,campaign_id)).fetchone())
+        if campaign_id:engine.create_followups(db,result)
+        return result
 
 
 def _fingerprint(draft,contact,profile,job):
-    values = [draft['sender_email'],draft['recipient_email'],draft['subject'],draft['body'],contact['email'],contact['verified'],contact['suppressed'],contact['updated_at'],profile.get('updated_at'),profile.get('email'),job['title'],job['company'],job['url']]
+    values = [draft['sender_email'],draft['recipient_email'],draft['subject'],draft['body'],contact['email'],contact['verified'],contact['suppressed'],contact['updated_at'],profile.get('updated_at'),profile.get('email'),job['title'],job['company'],job['url'],draft.get('resume_sha'),draft.get('campaign_id'),draft.get('step_number')]
     return hashlib.sha256(json.dumps(values,ensure_ascii=False).encode()).hexdigest()
 
 
 def _eligible(draft,contact,profile):
+    import resume_store
+    if os.getenv('RENDER','').lower()=='true' and not postgres_enabled() and os.getenv('OUTREACH_SQLITE_PERSISTENT','').lower()!='true':
+        raise HTTPException(409,'Persistent outreach storage is required on Render. Configure PostgreSQL or a confirmed persistent SQLite disk before sending.')
+    attachment=resume_store.get()
+    if not attachment or draft.get('resume_sha')!=attachment['sha256']:
+        raise HTTPException(409,'Upload the current PDF resume and bind it to this draft before approval or sending.')
     if contact['suppressed'] or not contact['verified']:
         raise HTTPException(409,'Recipient requires verification or has opted out.')
     if draft['recipient_email'] != contact['email'] or draft['sender_email'] != _email(profile.get('email')):
@@ -214,7 +246,8 @@ def approve_draft(draft_id,payload):
         if draft['state'] not in {'draft','approved','failed'}:
             raise HTTPException(409,'This draft cannot be approved again.')
         contact = _row(db,'outreach_contacts',draft['contact_id'])
-        job = _job(db,draft['job_id'])
+        from outreach_engine import context_job
+        job = context_job(db,draft)
         _eligible(draft,contact,profile)
         fingerprint = _fingerprint(draft,contact,profile,job)
         changed = db.execute("UPDATE outreach_drafts SET state='approved',approval_hash=?,error='',updated_at=? WHERE id=? AND state IN ('draft','approved','failed') AND updated_at=?",(fingerprint,now(),draft_id,draft['updated_at']))
@@ -257,7 +290,10 @@ def unsubscribe_contact(token):
     return int(row['contact_id'])
 
 
-async def send_draft(draft_id):
+async def send_draft(draft_id, *, replies_checked=False):
+    import outreach_engine as engine
+    import resume_store
+    if engine.settings()['paused']:raise HTTPException(409,'Outreach is paused globally.')
     profile = get_profile_full()
     gmail = gmail_alerts.get_gmail_status()
     if not gmail.get('send_authorized') or str(gmail.get('email') or '').lower() != str(profile.get('email') or '').lower():
@@ -269,18 +305,33 @@ async def send_draft(draft_id):
     if not token:
         raise HTTPException(409,'Connect Gmail first.')
     timestamp = now()
+    profile=get_profile_full()
     with connect() as db:
         draft = _row(db,'outreach_drafts',draft_id)
         if draft['state'] != 'approved':
             raise HTTPException(409,'Only an explicitly approved draft may be sent; sent or ambiguous deliveries are not retried.')
         contact = _row(db,'outreach_contacts',draft['contact_id'])
-        job = _job(db,draft['job_id'])
+        from outreach_engine import context_job
+        job = context_job(db,draft)
         _eligible(draft,contact,profile)
         if _fingerprint(draft,contact,profile,job) != draft['approval_hash']:
             raise HTTPException(409,'Profile, contact or draft changed after approval. Review and approve again.')
+        rules=engine.settings(db)
+        engine.business_time(contact,rules)
+        engine.validate_campaign(db,draft)
+        if draft.get('parent_id'):
+            if draft['step_number']>rules['followups']:raise HTTPException(409,'This follow-up exceeds the current maximum. Review the campaign rules.')
+            if not replies_checked:
+                raise HTTPException(409,'Follow-ups require a fresh successful Gmail reply check; use the queue worker.')
+            root=_row(db,'outreach_drafts',draft['parent_id'])
+            if root['state']!='sent' or root['response_status'] or not root['thread_id'] or not draft['due_at'] or draft['due_at']>engine.stamp():
+                raise HTTPException(409,'Follow-up is not due, has a reply or has no confirmed Gmail thread.')
+            previous = db.execute("SELECT id FROM outreach_drafts WHERE parent_id=? AND step_number<? AND state!='sent'",(root['id'],draft['step_number'])).fetchone()
+            if previous:raise HTTPException(409,'An earlier follow-up is not confirmed sent.')
+        attachment=resume_store.get(db,include_bytes=True)
         cutoff = (datetime.now(timezone.utc)-timedelta(days=7)).isoformat()
         recent = db.execute("SELECT id FROM outreach_drafts WHERE recipient_email=? AND state IN ('sent','sending','delivery_unknown') AND (sent_at>=? OR updated_at>=?)",(contact['email'],cutoff,cutoff)).fetchone()
-        if recent:
+        if recent and not draft.get('parent_id'):
             raise HTTPException(409,'This recipient has a recent or uncertain delivery; no additional email will be sent.')
         claimed = db.execute("UPDATE outreach_drafts SET state='sending',updated_at=? WHERE id=? AND state='approved' AND approval_hash=?",(timestamp,draft_id,draft['approval_hash']))
         if claimed.rowcount != 1:
@@ -289,9 +340,19 @@ async def send_draft(draft_id):
         reserved = db.execute('INSERT INTO outreach_recipient_usage(email,reserved_at) VALUES (?,?) ON CONFLICT(email) DO NOTHING',(contact['email'],timestamp))
         if reserved.rowcount != 1:
             renewed = db.execute('UPDATE outreach_recipient_usage SET reserved_at=? WHERE email=? AND reserved_at<?',(timestamp,contact['email'],cutoff))
-            if renewed.rowcount != 1:
+            if renewed.rowcount != 1 and not draft.get('parent_id'):
                 raise HTTPException(409,'A recent outreach attempt already reserved this recipient.')
-        day = timestamp[:10]
+        if draft.get('parent_id'):
+            db.execute('UPDATE outreach_recipient_usage SET reserved_at=? WHERE email=?',(timestamp,contact['email']))
+        else:
+            company_key=draft.get('target_domain') or contact['company_domain']
+            if not company_key:raise HTTPException(409,'Verify the employer company domain first.')
+            company_claim=db.execute('INSERT INTO outreach_company_usage(company_key,draft_id,reserved_at) VALUES (?,?,?) ON CONFLICT(company_key) DO NOTHING',(company_key,draft_id,timestamp))
+            if company_claim.rowcount!=1:
+                previous_company=db.execute('SELECT draft_id FROM outreach_company_usage WHERE company_key=?',(company_key,)).fetchone()
+                if previous_company['draft_id']!=draft_id:raise HTTPException(409,'An initial email already reserved this company. Review company history.')
+        from zoneinfo import ZoneInfo
+        day = engine.utcnow().astimezone(ZoneInfo(rules['timezone'])).date().isoformat()
         cap = db.execute('SELECT daily_limit FROM outreach_policy WHERE id=1').fetchone()[0]
         db.execute('INSERT INTO outreach_daily_usage(day,reserved) VALUES (?,0) ON CONFLICT(day) DO NOTHING',(day,))
         usage = db.execute('UPDATE outreach_daily_usage SET reserved=reserved+1 WHERE day=? AND reserved<?',(day,cap))
@@ -303,13 +364,21 @@ async def send_draft(draft_id):
     message['Subject'] = draft['subject']
     message['Message-ID'] = f"<job-hunter-outreach-{draft_id}@{urlparse(os.getenv('PORTAL_PUBLIC_URL','https://autonomous-job-hunter-docker.onrender.com')).hostname}>"
     message.set_content(draft['body'])
+    message.add_attachment(attachment['content'],maintype='application',subtype='pdf',filename=attachment['filename'])
+    envelope={}
+    if draft.get('parent_id'):
+        message['In-Reply-To']=root['rfc_message_id']
+        message['References']=root['rfc_message_id']
+        envelope['threadId']=root['thread_id']
+    thread_id=''
     state, receipt, error = 'delivery_unknown', '', 'Delivery outcome is uncertain; check Gmail Sent before any further action.'
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(gmail_alerts.GMAIL_API+'/messages/send',headers={'Authorization':'Bearer '+token},json={'raw':base64.urlsafe_b64encode(message.as_bytes()).decode()})
+            response = await client.post(gmail_alerts.GMAIL_API+'/messages/send',headers={'Authorization':'Bearer '+token},json={**envelope,'raw':base64.urlsafe_b64encode(message.as_bytes()).decode()})
         if 200 <= response.status_code < 300:
             try:
                 receipt = str(response.json().get('id') or '')[:200]
+                thread_id = str(response.json().get('threadId') or '')[:200]
             except ValueError:
                 pass
             if receipt:
@@ -322,19 +391,31 @@ async def send_draft(draft_id):
         if state == 'failed':
             db.execute('DELETE FROM outreach_recipient_usage WHERE email=? AND reserved_at=?',(draft['recipient_email'],timestamp))
         db.execute('UPDATE outreach_drafts SET state=?,provider_id=?,error=?,updated_at=?,sent_at=? WHERE id=?',(state,receipt,error,now(),now() if state=='sent' else None,draft_id))
+        db.execute('UPDATE outreach_drafts SET thread_id=?,rfc_message_id=? WHERE id=?',(thread_id,str(message['Message-ID']),draft_id))
+        if state=='sent':
+            root_id=draft.get('parent_id') or draft_id
+            delay=rules['first_followup_days'] if not draft.get('parent_id') else rules['final_followup_days']
+            due=engine.working_days_after(now(),delay,contact['timezone'])
+            db.execute('UPDATE outreach_drafts SET due_at=? WHERE parent_id=? AND step_number=?',(due,root_id,draft['step_number']+1))
+        elif state=='failed' and not draft.get('parent_id'):
+            db.execute('DELETE FROM outreach_company_usage WHERE draft_id=?',(draft_id,))
         return _row(db,'outreach_drafts',draft_id)
 
 
-async def dispatch_approved():
+async def dispatch_approved(*, followups_allowed=False, checked_roots=()):
     if not policy()['auto_send_approved']:
         return {'sent':0,'message':'Automatic approved-email sending is disabled.'}
     with connect() as db:
-        ids = [row['id'] for row in db.execute("SELECT id FROM outreach_drafts WHERE state='approved' AND candidate_id=? ORDER BY id LIMIT 20",(CANDIDATE_ID,))]
+        ids = [row['id'] for row in db.execute("SELECT id FROM outreach_drafts WHERE state='approved' AND candidate_id=? ORDER BY step_number,id LIMIT 20",(CANDIDATE_ID,))]
     results=[]
     for draft_id in ids:
         try:
-            results.append(await send_draft(draft_id))
+            with connect() as db:
+                candidate=_row(db,'outreach_drafts',draft_id)
+            if candidate.get('parent_id') and (not followups_allowed or candidate['parent_id'] not in checked_roots):continue
+            results.append(await send_draft(draft_id,replies_checked=followups_allowed))
         except HTTPException as exc:
+            with connect() as db:db.execute("UPDATE outreach_drafts SET error=? WHERE id=? AND state='approved'",(str(exc.detail)[:500],draft_id))
             if exc.status_code in {429,503}:break
             results.append({'id':draft_id,'state':'blocked','error':str(exc.detail)})
     return {'sent':sum(row['state']=='sent' for row in results),'results':results}
@@ -362,7 +443,7 @@ async def search_apollo(payload):
         raise HTTPException(422,'Enter the employer company domain, for example meesho.com.')
     params = {
         'q_organization_domains_list': [domain],
-        'person_titles': ['Recruiter','Talent Acquisition','HR Manager','Human Resources Manager'],
+        'person_titles': ['Recruiter','Talent Acquisition','HR Manager','Human Resources Manager','Head of Operations','Operations Director'],
         'page': 1,
         'per_page': 10,
     }
@@ -371,6 +452,8 @@ async def search_apollo(payload):
     for person in (data.get('people') or [])[:10]:
         identifier = str(person.get('id') or person.get('person_id') or '')
         if identifier:
+            with connect() as db:
+                db.execute('INSERT INTO outreach_leads(apollo_id,domain,searched_at) VALUES (?,?,?) ON CONFLICT(apollo_id) DO UPDATE SET domain=excluded.domain,searched_at=excluded.searched_at',(identifier,domain,now()))
             items.append({'apollo_id':identifier,'name':str(person.get('name') or person.get('first_name') or '')[:200],'title':str(person.get('title') or '')[:200],'company':str((person.get('organization') or {}).get('name') or '')[:200]})
     return {'items':items,'note':'Search does not reveal email addresses. Work-email enrichment requires confirmation and may consume Apollo credits. Company-domain matches may include former employers; verify current responsibility.'}
 
@@ -385,10 +468,24 @@ async def enrich_apollo(payload):
         cached = db.execute('SELECT * FROM outreach_contacts WHERE candidate_id=? AND apollo_id=?',(CANDIDATE_ID,identifier)).fetchone()
         if cached:
             return _serialize(cached)
-    data = await _apollo('people/match',{'id':identifier,'reveal_personal_emails':False,'reveal_phone_number':False})
+    from outreach_engine import claim_enrichment
+    if not os.getenv('APOLLO_API_KEY','').strip():
+        raise HTTPException(503,'Add APOLLO_API_KEY securely in Render before reserving an enrichment lookup.')
+    domain=claim_enrichment(identifier)
+    try:
+        data = await _apollo('people/match',{'id':identifier,'reveal_personal_emails':False,'reveal_phone_number':False})
+    except HTTPException:
+        with connect() as db:db.execute("UPDATE outreach_enrichment SET state='uncertain',detail='Provider request failed; check Apollo before attempting another reveal.',updated_at=? WHERE apollo_id=?",(now(),identifier))
+        raise
+    with connect() as db:db.execute("UPDATE outreach_enrichment SET state='no_verified_email',detail='Lookup completed; no verified employer email has been saved yet.',updated_at=? WHERE apollo_id=?",(now(),identifier))
     person = data.get('person') or {}
     if str(person.get('email_status') or '').strip().lower() != 'verified':
         raise HTTPException(422,'Apollo has not verified this work email. No unverified address will be saved.')
     if not person.get('email'):
         raise HTTPException(422,'Apollo did not return a work email. No address will be guessed.')
-    return create_contact({'email':person['email'],'name':person.get('name') or person.get('first_name'),'title':person.get('title'),'company':(person.get('organization') or {}).get('name'),'source_url':person.get('linkedin_url') or 'https://app.apollo.io/#/people/'+identifier,'apollo_id':identifier,'email_status':person.get('email_status') or 'unverified'})
+    if _email(person['email']).split('@')[1]!=domain:
+        raise HTTPException(422,'Returned email domain does not match the shortlisted employer. Verify current employment before using another sourced contact.')
+    result = create_contact({'email':person['email'],'name':person.get('name') or person.get('first_name'),'title':person.get('title'),'company':(person.get('organization') or {}).get('name'),'source_url':person.get('linkedin_url') or 'https://app.apollo.io/#/people/'+identifier,'apollo_id':identifier,'email_status':person.get('email_status') or 'unverified','company_domain':domain})
+    with connect() as db:
+        db.execute("UPDATE outreach_enrichment SET state='saved',contact_id=?,detail='One work-email lookup; actual credits depend on Apollo account billing.',updated_at=? WHERE apollo_id=?",(result['id'],now(),identifier))
+    return result

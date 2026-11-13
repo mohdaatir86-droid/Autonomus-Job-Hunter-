@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -29,7 +29,8 @@ from browser_worker import run_application_worker, browser_health_check
 from automation_routes import router as automation_router
 from application_state import init_application_state_db
 from outreach_routes import router as outreach_router
-from outreach import init_outreach_db, dispatch_approved
+from outreach import init_outreach_db
+from outreach_engine import tick as outreach_tick
 
 from application_workflow import (
     init_workflow_db,
@@ -151,6 +152,7 @@ def _verify_google_credential(credential: str) -> dict[str, Any]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.scheduler = None
     initialize_database_schema()
     init_db()
     init_workflow_db()
@@ -158,6 +160,8 @@ async def lifespan(app: FastAPI):
     init_automation_settings()
     init_application_state_db()
     init_outreach_db()
+    from outreach_engine import readiness_summary
+    log.info("Outreach readiness (configuration only): %s", readiness_summary())
     if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -240,7 +244,7 @@ async def lifespan(app: FastAPI):
                 max_instances=1,
                 coalesce=True,
             )
-            scheduler.add_job(dispatch_approved,"interval",minutes=1,id="approved-outreach",replace_existing=True,max_instances=1,coalesce=True)
+            scheduler.add_job(outreach_tick,"interval",minutes=1,id="approved-outreach",replace_existing=True,max_instances=1,coalesce=True)
             scheduler.start()
             app.state.scheduler = scheduler
             log.info("Job discovery scheduler started; interval=%s minutes", minutes)
@@ -248,7 +252,7 @@ async def lifespan(app: FastAPI):
             log.exception("Scheduler could not start; manual hunt endpoint remains available")
     yield
     scheduler = getattr(app.state, "scheduler", None)
-    if scheduler:
+    if scheduler and scheduler.running:
         scheduler.shutdown(wait=False)
 
 
@@ -534,8 +538,17 @@ def jobs(
 @app.post("/api/hunt")
 @app.post("/api/integrations/n8n/hunt")
 @app.post("/api/integrations/github/hunt")
-async def hunt():
-    return await hunt_jobs()
+async def hunt(background_tasks: BackgroundTasks):
+    result = await hunt_jobs()
+    background_tasks.add_task(_bounded_outreach_tick)
+    return result
+
+
+async def _bounded_outreach_tick():
+    try:
+        await asyncio.wait_for(outreach_tick(),timeout=90)
+    except Exception as exc:
+        log.warning("Outreach queue tick deferred: %s",type(exc).__name__)
 
 
 @app.get("/api/settings")

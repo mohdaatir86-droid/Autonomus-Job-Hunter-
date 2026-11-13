@@ -52,6 +52,9 @@ def test_postgres_concurrent_outreach_cannot_contact_one_recipient_twice(monkeyp
     with TestClient(main.app):
         application_workflow.save_profile({'full_name':'Concurrency Fixture','email':'candidate@example.com','experience_summary':'Led verified warehouse operations.'})
         with job_hunter.connect() as db:
+            import resume_store
+            from test_workflow_regressions import text_pdf
+            resume_store.save(db,'fixture.pdf',text_pdf('Fixture operations resume'))
             db.execute("UPDATE candidate_profile SET resume_text='Fixture resume' WHERE id=1")
             ids=[]
             for index in range(2):
@@ -61,7 +64,11 @@ def test_postgres_concurrent_outreach_cannot_contact_one_recipient_twice(monkeyp
         with job_hunter.connect() as db:
             db.execute('DELETE FROM outreach_daily_usage')
         person=outreach.create_contact({'email':unique+'@example.com','name':'Recruiter','source_url':'https://linkedin.com/in/fixture'})
-        outreach.verify_contact(person['id'],{'email_confirmed':True,'employer_confirmed':True,'role_confirmed':True,'note':'Fixture verification for concurrent-claim regression.'})
+        outreach.verify_contact(person['id'],{'email_confirmed':True,'employer_confirmed':True,'role_confirmed':True,'note':'Fixture verification for concurrent-claim regression.','timezone':'Asia/Kolkata'})
+        import outreach_engine
+        from datetime import datetime,timezone
+        monkeypatch.setattr(outreach_engine,'utcnow',lambda:datetime(2026,11,13,5,0,tzinfo=timezone.utc))
+        outreach_engine.save_settings({'paused':False})
         drafts=[outreach.create_draft(person['id'],job_id) for job_id in ids]
         for draft in drafts:outreach.approve_draft(draft['id'],{'confirmed':True,'recipient_relevance_confirmed':True})
         monkeypatch.setattr(gmail_alerts,'get_gmail_status',lambda:{'send_authorized':True,'email':'candidate@example.com'})
@@ -91,3 +98,21 @@ def test_postgres_concurrent_outreach_cannot_contact_one_recipient_twice(monkeyp
         with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(send,drafts))
         assert sorted(results)==['blocked','sent']
         assert len(calls)==1
+
+
+def test_postgres_campaign_schema_and_resume_survive_reinitialization(monkeypatch):
+    import outreach,outreach_engine,resume_store
+    from test_workflow_regressions import text_pdf
+    url=os.getenv('TEST_POSTGRES_URL')
+    if not url:pytest.skip('TEST_POSTGRES_URL not configured')
+    assert __import__('urllib.parse',fromlist=['urlsplit']).urlsplit(url).path.endswith('_test')
+    monkeypatch.setenv('DATABASE_URL',url)
+    monkeypatch.setenv('ENABLE_SCHEDULER','false')
+    with TestClient(main.app):
+        content=text_pdf('Persistent PostgreSQL fixture PDF')
+        application_workflow.store_resume('pg-fixture.pdf',content)
+        c=outreach_engine.create_campaign({'name':'PG '+uuid.uuid4().hex,'kind':'introduction'})
+        outreach.init_outreach_db()
+        assert resume_store.get(include_bytes=True)['content']==content
+        with outreach.connect() as db:
+            assert db.execute('SELECT kind FROM outreach_campaigns WHERE id=?',(c['id'],)).fetchone()[0]=='introduction'

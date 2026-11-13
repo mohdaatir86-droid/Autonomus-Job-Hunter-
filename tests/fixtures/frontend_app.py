@@ -4,6 +4,9 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 import httpx
 import main,job_sources,job_hunter,notify,gmail_alerts,outreach
+import outreach_engine
+from datetime import datetime,timezone
+outreach_engine.utcnow=lambda:datetime(2026,11,13,5,tzinfo=timezone.utc)
 async def sources(settings):
     rows=[]
     for i,title in enumerate(['Operations Manager','Senior Cluster Manager','Area Manager']):
