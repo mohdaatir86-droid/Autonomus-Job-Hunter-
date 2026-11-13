@@ -35,6 +35,8 @@ The programme runs from the existing outreach tick (including authenticated disc
 
 New profile/PDF versions continue to invalidate email approvals. Previously prepared drafts retain their old attachment hash and remain blocked until the current PDF is attached and the exact content is reviewed again. The ongoing programme does not grant permission for conversational replies or remove finite batch approval.
 
+Use **Use latest PDF** on a campaign to bind the latest validated PDF to all its unsent initial/follow-up drafts in one transaction. The action clears batch approvals and does not rewrite email claims or change sent, in-flight, cancelled or uncertain records. Review stale content separately and approve a fresh preview. Individual attachment refresh captures the selected draft before awaiting responses, and saving edits reports completion only after the private queue has reloaded.
+
 The web scheduler runs one outreach tick per minute while awake. The existing authenticated GitHub discovery route also schedules a bounded background outreach tick after discovery; its OIDC authorization scope is unchanged, and no public sending route was added. Keep the obsolete n8n discovery workflow inactive. Database leases prevent overlapping outreach passes.
 
 Free Render sleep still delays processing until the next wake. Due times, campaign approvals, reservations, replies, suppressions and PDF bytes persist in the configured durable database. A GitHub wake is six-hourly, so free hosting does not guarantee minute-accurate delivery or immediate reply synchronization. Follow-ups recheck Gmail before dispatch after waking. An always-running service is needed for continuous processing; no paid plan is selected automatically.

@@ -112,6 +112,8 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             expect(page.locator('#outreachBody')).to_have_value(re.compile('future operations opportunities'))
             expect(page.locator('#outreachAttachment')).to_contain_text('fixture-resume.pdf')
             page.locator('#outreachComposeDialog button').filter(has_text='Close').click()
+            page.get_by_role('button',name='Use latest PDF',exact=True).click()
+            expect(page.locator('.toast').last).to_contain_text('Latest PDF attached to 3 unsent drafts')
             page.get_by_role('button',name='Preview / approve',exact=True).click()
             expect(page.locator('#campaignPreviewEmails')).to_contain_text('Follow-up 2')
             expect(page.locator('#campaignPreviewFacts')).to_contain_text('First follow-up: 5 working days')
