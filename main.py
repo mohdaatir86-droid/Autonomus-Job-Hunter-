@@ -390,8 +390,7 @@ def healthz():
     return {"status": "ok", "service": "autonomous-job-hunter"}
 
 
-@app.get("/api/auth/google/config")
-def google_sign_in_config():
+def _google_sign_in_settings():
     client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     portal_key_ready = bool(_portal_session_key())
     enabled = bool(client_id and portal_key_ready)
@@ -402,6 +401,39 @@ def google_sign_in_config():
     else:
         reason = "Sign in with the same Google email saved in your Job Hunter profile."
     return {"enabled": enabled, "client_id": client_id if enabled else None, "reason": reason}
+
+
+GOOGLE_LOGIN_COOKIE = "jh_google_login_nonce"
+
+
+def _google_login_nonce() -> str:
+    value = str(int(time.time())) + "." + secrets.token_urlsafe(32)
+    signature = _b64url(hmac.new(_portal_session_key(), ("google-login:" + value).encode(), hashlib.sha256).digest())
+    return value + "." + signature
+
+
+def _valid_google_login_nonce(nonce: str) -> bool:
+    try:
+        issued, random_value, signature = nonce.split(".")
+        if not 0 <= time.time() - int(issued) <= 600 or len(random_value) < 32:
+            return False
+        expected = _b64url(hmac.new(_portal_session_key(), ("google-login:" + issued + "." + random_value).encode(), hashlib.sha256).digest())
+        return _secure_equal(signature, expected)
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+@app.get("/api/auth/google/config")
+def google_sign_in_config(request: Request):
+    config = _google_sign_in_settings()
+    if config["enabled"]:
+        config["nonce"] = _google_login_nonce()
+    response = JSONResponse(config, headers={"Cache-Control": "no-store"})
+    if config["enabled"]:
+        secure = request.url.scheme == "https" or os.getenv("RENDER_EXTERNAL_URL", "").startswith("https://")
+        response.set_cookie(GOOGLE_LOGIN_COOKIE, config["nonce"], max_age=600, httponly=True,
+                            secure=secure, samesite="strict", path="/api/auth/google/session")
+    return response
 
 
 @app.get("/api/auth/session")
@@ -415,30 +447,56 @@ def google_sign_in_session(request: Request):
 @app.post("/api/auth/google/session")
 async def google_sign_in(request: Request):
     """Verify Google's ID token and issue a short-lived, HttpOnly portal session."""
-    if not google_sign_in_config().get("enabled"):
-        return RedirectResponse("/?google_signin=not_configured#profilePanel", status_code=303)
+    is_json = request.headers.get("content-type", "").split(";", 1)[0].strip().lower() == "application/json"
+    def failure(reason, status=401):
+        # Fixed reason codes only; never log credentials, cookies or token payloads.
+        log.warning("Google portal sign-in rejected: %s", reason)
+        if is_json:
+            messages = {"email_mismatch":"Use the same Google email saved in your Job Hunter profile.",
+                        "browser_binding":"This sign-in page expired. Refresh Job Hunter before signing in again.",
+                        "token_nonce_mismatch":"This Google response belongs to a different sign-in page. Refresh Job Hunter.",
+                        "not_configured":"Google sign-in is not configured on the server. Use your private access key.",
+                        "origin_mismatch":"Open Job Hunter directly before signing in."}
+            return JSONResponse({"detail": messages.get(reason,"Google sign-in could not be verified. Refresh Job Hunter before trying again.")}, status_code=status)
+        return RedirectResponse("/?google_signin=" + ("email_mismatch" if reason=="email_mismatch" else "not_configured" if reason=="not_configured" else "failed") + "#profilePanel", status_code=303)
+    if not _google_sign_in_settings().get("enabled"):
+        return failure("not_configured", 503)
     try:
-        form = await request.form()
-        form_csrf = str(form.get("g_csrf_token") or "")
-        cookie_csrf = request.cookies.get("g_csrf_token", "")
-        if not form_csrf or not cookie_csrf or not _secure_equal(form_csrf, cookie_csrf):
-            return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
+        login_nonce = ""
+        if is_json:
+            expected_origin = (os.getenv("RENDER_EXTERNAL_URL") or os.getenv("PORTAL_PUBLIC_URL") or str(request.base_url)).rstrip("/")
+            if request.headers.get("origin", "").rstrip("/") != expected_origin:
+                return failure("origin_mismatch", 403)
+            form = await request.json()
+            if not isinstance(form, dict):return failure("invalid_body", 422)
+            login_nonce = str(form.get("login_nonce") or "")
+            cookie_nonce = request.cookies.get(GOOGLE_LOGIN_COOKIE, "")
+            if not login_nonce or len(login_nonce)>400 or not cookie_nonce or not _secure_equal(login_nonce,cookie_nonce) or not _valid_google_login_nonce(login_nonce):
+                return failure("browser_binding", 403)
+        else:
+            form = await request.form()
+            form_csrf = str(form.get("g_csrf_token") or "")
+            cookie_csrf = request.cookies.get("g_csrf_token", "")
+            if not form_csrf or not cookie_csrf or not _secure_equal(form_csrf,cookie_csrf):
+                return failure("csrf_mismatch", 403)
         credential = str(form.get("credential") or "")
         if not credential or len(credential) > 16384:
-            return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
+            return failure("missing_credential", 422)
         # google-auth fetches verification certificates through synchronous HTTP.
         # Keep login latency from blocking every request and scheduled job.
         claims = await asyncio.to_thread(_verify_google_credential, credential)
+        if is_json and not _secure_equal(str(claims.get("nonce") or ""), login_nonce):
+            return failure("token_nonce_mismatch",403)
         email = str(claims.get("email") or "").strip().lower()
         if claims.get("email_verified") is not True or not claims.get("sub") or not email:
-            return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
+            return failure("unverified_identity")
         profile_email = str(get_profile().get("email") or "").strip().lower()
         if not profile_email or not _secure_equal(profile_email, email):
-            return RedirectResponse("/?google_signin=email_mismatch#profilePanel", status_code=303)
+            return failure("email_mismatch")
         session_cookie = _issue_portal_session(email)
         if not session_cookie:
-            return RedirectResponse("/?google_signin=not_configured#profilePanel", status_code=303)
-        response = RedirectResponse("/?google_signin=success#profilePanel", status_code=303)
+            return failure("not_configured",503)
+        response = JSONResponse({"authenticated":True}) if is_json else RedirectResponse("/?google_signin=success#profilePanel", status_code=303)
         public_origin = os.getenv("RENDER_EXTERNAL_URL", "").lower()
         secure_cookie = request.url.scheme.lower() == "https" or public_origin.startswith("https://")
         csrf_cookie = secrets.token_urlsafe(32)
@@ -460,10 +518,11 @@ async def google_sign_in(request: Request):
             samesite="lax",
             path="/",
         )
+        response.delete_cookie(GOOGLE_LOGIN_COOKIE,path="/api/auth/google/session")
         return response
     except Exception as exc:
         log.warning("Google sign-in failed (%s)", type(exc).__name__)
-        return RedirectResponse("/?google_signin=failed#profilePanel", status_code=303)
+        return failure("verification_failed")
 
 
 @app.post("/api/auth/logout")
