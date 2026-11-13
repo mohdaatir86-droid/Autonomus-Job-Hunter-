@@ -445,3 +445,21 @@ def prepare_batch(payload):
     campaign=create_campaign({'name':str(payload.get('name') or 'Matched vacancy applications'),'kind':'vacancy'})
     for job,contact in selected:outreach.create_draft(contact['id'],job['id'],campaign_id=campaign['id'])
     return {'prepared':len(selected),'campaign_id':campaign['id'],'pending_contacts':missing,'preview':campaign_preview(campaign['id'])}
+
+
+
+def readiness_summary():
+    """Operational booleans only: no addresses, keys, tokens, PDF bytes or mailbox text."""
+    import os
+    import gmail_alerts
+    status=gmail_alerts.get_gmail_status()
+    with connect() as db:
+        row=db.execute('SELECT granted_scopes FROM gmail_tokens WHERE id=1').fetchone()
+    return {'apollo_configured':bool(os.getenv('APOLLO_API_KEY','').strip()),
+            'gmail_connected_record':bool(status.get('connected')),
+            'gmail_send_granted':bool(status.get('send_authorized')),
+            'gmail_read_granted':bool(row and 'https://www.googleapis.com/auth/gmail.readonly' in (row[0] or '').split()),
+            'original_pdf_stored':bool(resume_store.get()),
+            'storage':'postgresql' if postgres_enabled() else 'sqlite',
+            'persistent_storage_confirmed':bool(postgres_enabled() or os.getenv('OUTREACH_SQLITE_PERSISTENT','').lower()=='true'),
+            'globally_paused':settings()['paused']}

@@ -160,6 +160,8 @@ async def lifespan(app: FastAPI):
     init_automation_settings()
     init_application_state_db()
     init_outreach_db()
+    from outreach_engine import readiness_summary
+    log.info("Outreach readiness (configuration only): %s", readiness_summary())
     if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
