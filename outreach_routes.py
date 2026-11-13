@@ -114,6 +114,17 @@ def campaign(payload:dict):return engine.create_campaign(payload)
 @router.get('/api/outreach/campaigns/{campaign_id}/preview')
 def preview(campaign_id:int):return engine.campaign_preview(campaign_id)
 
+@router.post('/api/outreach/campaigns/{campaign_id}/resume')
+def refresh_campaign_resume(campaign_id:int):
+    item=resume_store.get()
+    if not item:raise HTTPException(409,'Upload the current PDF first.')
+    with outreach.connect() as db:
+        campaign=db.execute('SELECT id FROM outreach_campaigns WHERE id=?',(campaign_id,)).fetchone()
+        if not campaign:raise HTTPException(404,'Campaign not found.')
+        db.execute("UPDATE outreach_campaigns SET state=CASE WHEN state='active' THEN 'paused' ELSE state END,approval_hash='',approved_snapshot='',updated_at=? WHERE id=?",(outreach.now(),campaign_id))
+        changed=db.execute("UPDATE outreach_drafts SET resume_sha=?,state='draft',approval_hash='',error='Resume refreshed; review the current PDF and email content.',updated_at=? WHERE campaign_id=? AND state IN ('draft','approved','failed')",(item['sha256'],outreach.now(),campaign_id))
+    return {'updated':changed.rowcount,'resume':item,'approval_required':True}
+
 @router.post('/api/outreach/campaigns/{campaign_id}/activate')
 def activate(campaign_id:int,payload:dict):return engine.activate_campaign(campaign_id,payload)
 
