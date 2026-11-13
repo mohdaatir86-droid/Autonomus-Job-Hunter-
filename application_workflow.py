@@ -31,6 +31,8 @@ def _connect():
 
 
 def init_workflow_db():
+    import resume_store
+    resume_store.initialize()
     with _connect() as conn:
         if not postgres_enabled():
             conn.execute("""CREATE TABLE IF NOT EXISTS candidate_profile (
@@ -82,6 +84,8 @@ def get_profile():
     row["skills"] = json.loads(row.get("skills") or "[]")
     row["has_resume"] = bool(row.get("resume_text"))
     row.pop("resume_text", None)
+    import resume_store
+    row["resume_attachment"] = resume_store.get()
     return row
 
 
@@ -118,6 +122,8 @@ def save_profile(payload):
         assignments = ", ".join(k + "=?" for k in values)
         with _connect() as conn:
             conn.execute("UPDATE candidate_profile SET " + assignments + " WHERE id=1", list(values.values()))
+            from outreach_engine import invalidate_profile
+            invalidate_profile(conn)
     return get_profile()
 
 
@@ -136,7 +142,12 @@ def store_resume(filename, raw_bytes):
     if len(text) > 60000:
         text = text[:60000]
     init_workflow_db()
+    import resume_store
+    filename = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(filename).name)[:150] or "resume.pdf"
     with _connect() as conn:
+        resume_store.save(conn, filename, raw_bytes)
+        from outreach_engine import invalidate_profile
+        invalidate_profile(conn)
         conn.execute(
             "UPDATE candidate_profile SET resume_text=?, resume_filename=?, updated_at=? WHERE id=1",
             (text, Path(filename).name[:180], _now()),

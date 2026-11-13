@@ -67,6 +67,8 @@ def test_concurrent_attempt_creation_returns_one_record_and_event(private_db, mo
 
 
 def make_outreach_draft():
+    from test_workflow_regressions import text_pdf
+    application_workflow.store_resume("fixture.pdf",text_pdf("Verified fixture resume"))
     contact = outreach.create_contact({'email': 'recruiter@example.com', 'source_url': 'https://example.com/team', 'name': 'Recruiter'})
     outreach.verify_contact(contact['id'], {'email_confirmed': True, 'employer_confirmed': True, 'role_confirmed': True, 'note': 'Verified against the official company team page.'})
     draft = outreach.create_draft(contact['id'], 1)

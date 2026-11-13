@@ -4,6 +4,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 import main,job_hunter,application_workflow,gmail_alerts,application_state,browser_worker
+import outreach_engine
+from datetime import datetime,timezone
+from test_workflow_regressions import text_pdf
 
 HEADERS={'Authorization':'Bearer '+'fixture-outreach-owner-'*3}
 
@@ -22,10 +25,12 @@ def client(tmp_path,monkeypatch):
     monkeypatch.setattr(gmail_alerts,'get_gmail_status',lambda:{'connected':True,'oauth_configured':True,'send_authorized':True,'email':'candidate@example.com'})
     async def token():return 'fixture-access-token'
     monkeypatch.setattr(gmail_alerts,'_access_token',token)
+    monkeypatch.setattr(outreach_engine,"utcnow",lambda:datetime(2026,11,13,5,0,tzinfo=timezone.utc))
     with TestClient(main.app) as c:
+        outreach_engine.save_settings({"paused":False})
         application_workflow.save_profile({'full_name':'Fixture Candidate','email':'candidate@example.com','headline':'Operations manager','experience_summary':'Led warehouse operations.','skills':['inventory']})
+        application_workflow.store_resume('fixture.pdf',text_pdf('Fixture verified resume warehouse operations'))
         with job_hunter.connect() as db:
-            db.execute("UPDATE candidate_profile SET resume_text='Fixture verified resume' WHERE id=1")
             db.execute("INSERT INTO jobs(source,title,company,country,url,description,first_seen_at,last_seen_at) VALUES ('fixture','Operations Manager','Example','India','https://example.com/jobs/1','Warehouse inventory leadership',?,?)",(job_hunter.now_iso(),job_hunter.now_iso()))
         yield c
 
@@ -35,7 +40,7 @@ def contact(client,email='recruiter@example.com',verify=True):
     assert r.status_code==200,r.text
     item=r.json()
     if verify:
-        r=client.post(f"/api/outreach/contacts/{item['id']}/verify",headers=HEADERS,json={'email_confirmed':True,'employer_confirmed':True,'role_confirmed':True,'note':'Business email and recruiting responsibility checked against public professional source.'})
+        r=client.post(f"/api/outreach/contacts/{item['id']}/verify",headers=HEADERS,json={'email_confirmed':True,'employer_confirmed':True,'role_confirmed':True,'note':'Business email and recruiting responsibility checked against public professional source.','timezone':'Asia/Kolkata'})
         assert r.status_code==200,r.text
     return item
 
@@ -63,7 +68,7 @@ def test_verified_contact_truthful_draft_and_approval(client):
     item=draft(client,person['id'],True)
     assert 'Fixture Candidate' in item['body']
     assert 'Led warehouse operations' in item['body']
-    assert 'attached' not in item['body'].lower()
+    assert 'attached' in item['body'].lower()
     assert '/outreach/unsubscribe?token=' in item['body']
 
 
@@ -199,6 +204,8 @@ def test_repeated_apollo_reveal_reuses_saved_contact(client,monkeypatch):
         calls.append(True)
         return httpx.Response(200,json={'person':{'id':'cached-person','name':'Recruiter','email':'cached@example.com','email_status':'verified','linkedin_url':'https://linkedin.com/in/fixture','organization':{'name':'Example'}}})
     monkeypatch.setattr(httpx.AsyncClient,'post',post)
+    with job_hunter.connect() as db:
+        db.execute('INSERT INTO outreach_leads(apollo_id,domain,searched_at) VALUES (?,?,?)',('cached-person','example.com',outreach_engine.stamp()))
     for _ in range(2):
         result=client.post('/api/outreach/apollo/enrich',headers=HEADERS,json={'apollo_id':'cached-person','confirm_credit_use':True})
         assert result.status_code==200

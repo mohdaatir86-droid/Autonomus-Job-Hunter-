@@ -1,72 +1,45 @@
-# Recruiter outreach and redesigned workspace
+# Recruiter outreach campaigns
 
-The existing Render app now serves the frontend and API together. No separate Vercel project or frontend build is required. `dashboard.html` loads `static/app.css` and `static/app.js`; same-origin authentication and CSRF protections are retained.
+The existing FastAPI/Render service serves the private dashboard and outreach API. No separate site, database service or unrelated repository was created.
 
-## Workspace
+## What is implemented
 
-- **Job matches:** saved-market summary, real source metrics, filters, pagination, application drafts and a direct **Find recruiter** action carrying the selected role into outreach.
-- **Recruiter outreach:** company-specific Apollo search, work-email enrichment, contact verification, editable drafts, explicit approval, Gmail sending and sending rules.
-- **Applications:** existing application drafts and editable tracking statuses.
-- **Connections:** current provider configuration and source reports.
-- **Profile & rules:** private sign-in, profile/resume, search preferences, self-alert email testing and draft preparation rules.
+- Employer-domain Apollo search for recruitment/HR and operations hiring roles. A searched person must be explicitly shortlisted for a work-email reveal. Personal email, phone and waterfall enrichment are not requested. Current employer, hiring responsibility and recipient timezone require owner verification with a professional source.
+- Enrichment reservations are database-backed and serialized. Defaults allow 5 lookups/day and 50/month in the configured timezone. Attempts, missing results and uncertain provider requests remain recorded; they are not automatically repeated. Successful contacts are cached. These caps count lookup reservations, not an assertion of actual Apollo billing. Check account credits in Apollo.
+- Original PDF storage in the private database, with SHA-256 integrity, version, filename, timestamp and size. The upload pipeline still validates a text-based PDF up to 8 MB. Resume bytes are excluded from profile/preview JSON. An authenticated, no-store download is available under `/api/outreach/resume`.
+- Exact PDF MIME attachments for initial emails and follow-ups. Missing, stale or corrupt attachments block sending. Existing extracted resume text alone cannot be reconstructed into the original PDF: upload the current PDF once after this upgrade.
+- Candidate-authored experience sentences are ranked against the vacancy and copied into concise emails. Facts and metrics are never generated from company names or inferred from job requirements. All previews are editable.
+- Vacancy applications and future-opportunity introductions are distinct campaigns. Introductions do not create synthetic vacancies or imply an opening exists.
+- “Prepare up to 5 matched contacts” uses current job-search preferences and existing verified contacts, and reports employers needing contact research. It spends no Apollo credits and sends no emails.
+- A finite campaign preview includes the current profile, PDF metadata, saved targeting, exact contacts, all initial emails, exact follow-ups and rules. Activation requires the owner to confirm the profile and exact preview hash. It never authorizes unbounded new contacts. Changed profile, resume, targeting, contacts, emails or rules require renewed review. Automatic generation/sending to arbitrary future Apollo contacts is not enabled.
+- First contact per company, duplicate recipient reservations, a shared daily attempt cap, verified recipient business hours, database leases and atomic claims coordinate workers. Defaults: global pause on, auto-send-approved off, 5 total attempts/day, Asia/Kolkata daily reset, recipient-local weekdays 09:00–18:00, at most two follow-ups after 5 then 7 working days.
+- Gmail receipts retain message/thread IDs. Follow-ups preserve subject, `In-Reply-To`, `References` and Gmail thread ID. Any incoming reply stops follow-ups, including out-of-office and uncertain replies. Related delivery notices are also checked conservatively. Bounce/opt-out suppresses the contact across re-imports. A failed Gmail reply check prevents follow-up dispatch.
+- Replies are categorized as interview, resume requested, rejection, out-of-office, bounce, opt-out or needs review. Suggested responses are drafts for manual review; conversational replies are not auto-sent. Classification is heuristic, not a guarantee.
+- Global pause stops new sends. Global stop also clears queued approvals and pauses campaigns; already in-flight Gmail requests cannot be recalled. Sent and uncertain requests are never automatically retried. Interrupted `sending` rows become `delivery_unknown` after ten minutes.
 
-Mobile layouts turn table rows into cards. Empty/error states explain next actions; fixture counts and sample recruiters are never included in production data.
+## Secure setup
 
-## Activate Apollo
+1. Add `APOLLO_API_KEY` in the existing Render service's secure environment settings. Apollo account/API permissions are required. Do not paste credentials in chat or commit them.
+2. Keep Google OAuth client ID/secret and the existing Gmail callback. In Google Auth Platform, enable `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/gmail.send`. Use the portal's **Enable Gmail sending** to grant these scopes to the same address as the saved profile. Read-only consent cannot send; send-only consent cannot monitor replies.
+3. Confirm persistent storage. PostgreSQL stores the PDF and queue together, including with an external managed PostgreSQL provider. For SQLite on Render, configure `DATABASE_PATH` on a real attached persistent disk and only then set `OUTREACH_SQLITE_PERSISTENT=true`. Sending on Render is blocked without PostgreSQL or this explicit disk confirmation. Do not set the flag for an ephemeral filesystem.
+4. Verify the profile and upload the latest text-based PDF. An existing DOCX or extracted text is not an attachable PDF.
+5. Verify real contacts and recipient timezone, create a draft campaign, prepare 1–5 initial emails, inspect the exact preview including follow-ups and activate the batch. Then unpause globally and enable automatic sending of approved emails if desired. Manual initial sending also requires approval and respects all caps/hours.
 
-Add `APOLLO_API_KEY` in the existing Render service's secure environment settings, then save/redeploy. The key must be eligible for People API Search (Apollo documents master-key/account eligibility requirements). Never paste it into chat, source files or the browser.
+## Scheduling and recovery
 
-Search requires an employer's actual domain (for example `meesho.com`) and finds recruiter/HR roles, 10 leads per request. Search itself does not return email addresses. **Reveal work email — uses credits** invokes one enrichment only after confirmation. Saved Apollo contacts are reused on subsequent reveals rather than re-enriched. Personal email, phone and waterfall enrichment are not requested. Do not assume an email pattern or substitute an invented email when enrichment returns none.
+The web scheduler runs one outreach tick per minute while awake. The existing authenticated GitHub discovery route also schedules a bounded background outreach tick after discovery; its OIDC authorization scope is unchanged, and no public sending route was added. Keep the obsolete n8n discovery workflow inactive. Database leases prevent overlapping outreach passes.
 
-Official contracts checked during implementation:
+Free Render sleep still delays processing until the next wake. Due times, campaign approvals, reservations, replies, suppressions and PDF bytes persist in the configured durable database. A GitHub wake is six-hourly, so free hosting does not guarantee minute-accurate delivery or immediate reply synchronization. Follow-ups recheck Gmail before dispatch after waking. An always-running service is needed for continuous processing; no paid plan is selected automatically.
 
-- https://docs.apollo.io/reference/people-api-search
-- https://docs.apollo.io/reference/people-enrichment
+A successful send means **Accepted by Gmail**, not confirmed inbox delivery. Timeouts, cancellation after a send claim, server errors or missing receipts require checking Gmail Sent, not resending blindly.
 
-Apollo's documented domain match can include previous employers. A provider's `verified` email status does not verify current hiring responsibility. Contacts remain unreviewed until the owner checks the business address, current employer and recruiting role against a professional source and records a verification note.
+## Verification
 
-Other providers' legitimately obtained business contacts can be entered manually with a professional source URL. There is no arbitrary website scraper, bulk personal-email harvesting or inferred-address generator.
-
-## Authorize Gmail sending
-
-The existing Google OAuth client ID and secret are reused. In Google Auth Platform → Data access, include these scopes for the personal application:
-
-- `https://www.googleapis.com/auth/gmail.readonly` for the existing job-alert import.
-- `https://www.googleapis.com/auth/gmail.send` for reviewed application emails.
-
-Keep the existing callback `https://autonomous-job-hunter-docker.onrender.com/api/gmail/callback`. Add the connecting account as a test user if the Google app is in Testing.
-
-In the portal, sign into the private profile and click **Enable Gmail sending** in Recruiter outreach. Reconnect the same Gmail address saved in the candidate profile and approve Google's requested permissions. A previous read-only connection cannot send mail. Actual granted scopes are stored; absent/reduced permission leaves sending disabled. Google testing-mode token expiry and production verification requirements continue to apply.
-
-Resend remains the separate self-alert delivery provider. Its `onboarding@resend.dev` sender is not used for recruiter outreach. No Gmail password or app password is needed.
-
-## Review and sending
-
-1. Choose a real discovered role and employer domain; search Apollo or enter a sourced contact.
-2. Reveal one work email if needed and verify current responsibility.
-3. Prepare an email. The template uses the candidate's actual profile/skills; it does not invent achievements or claim a resume attachment.
-4. Review/edit the exact sender, recipient, subject and body. Saving edits clears approval. Confirm recipient relevance and approve the saved email.
-5. Click **Send approved email**, or explicitly enable **Automatically send emails I approve**. The scheduled worker processes approved drafts once per minute while `ENABLE_SCHEDULER=true`. A paused scheduler still allows manual sending. No draft is auto-approved.
-
-The default is automatic sending off and five attempts per UTC day; the owner can choose 1–20. UTC daily limits reset at 05:30 IST. Per-recipient reservations prevent concurrent sends across jobs/processes; a sent or uncertain delivery has a seven-day cooldown. Sent, in-flight and ambiguous drafts are not automatically retried. Definite provider rejections require fresh approval before a retry; they still count toward the daily attempt limit.
-
-`sent` means Gmail returned a message ID, not independently confirmed inbox delivery. The UI labels it **Accepted by Gmail**. A timeout/5xx/missing receipt becomes `delivery_unknown`; check Gmail Sent rather than blindly retrying.
-
-Every draft includes an opt-out link. GET displays a confirmation without changing state; POST suppresses that recipient and cancels queued emails. Suppression also survives re-importing the same normalized address. Already in-flight provider requests cannot be recalled. There are no automated follow-ups or reply/consent classification in this version.
-
-The candidate is the portal's existing single private profile (candidate ID 1). All contact, queue and policy APIs require the owner key/session and CSRF for session mutations. Only the opaque-token unsubscribe confirmation is public. Other profile/contact changes invalidate prior approval before dispatch.
-
-The original resume PDF is not retained by the existing upload pipeline, so this version sends profile-based text without attachments. The draft accurately offers to share the resume on request.
-
-## Validation and operations
-
-```bash
+```
 ENABLE_SCHEDULER=false python -m pytest -q
+node --check static/app.js
+node --check static/outreach_campaigns.js
 python tests/browser_smoke.py
 ```
 
-The browser smoke test launches its own local server and temporary SQLite database, blocks external browser requests and mocks Apollo/Gmail. It never contacts real recruiters or consumes credits. Set `CHROMIUM_EXECUTABLE_PATH` if Chromium is not discoverable; otherwise install the Playwright Chromium runtime. Screenshots go to `/tmp/job-hunter-browser-evidence` by default (`BROWSER_SMOKE_OUTPUT` overrides it).
-
-PostgreSQL integration/concurrency tests require `TEST_POSTGRES_URL` pointing to a disposable database ending in `_test`, never production. The tests mutate fixture profile/job/queue data and reset the fixture daily counter. CI supplies a dedicated PostgreSQL service.
-
-Startup applies migration `002_outreach.sql` for granted Gmail scopes and creates additive outreach tables. Existing profile/job data are preserved. No actual Apollo enrichment or Gmail delivery was performed during development; activation requires the owner's secure API key, Google consent and review of real recipients.
+All test emails, recipients, Apollo responses and Gmail messages are fixtures. PostgreSQL tests require a disposable `TEST_POSTGRES_URL` ending in `_test`; never use production. Browser smoke covers the campaign preview and iPhone widths. API keys, granted live Gmail scopes, actual Apollo eligibility and real recipient previews must be checked privately; tests do not establish them.
