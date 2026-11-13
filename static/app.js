@@ -139,8 +139,9 @@ async function loadCoverage(){if(!privateConnectionReady())return;try{const stat
 async function runHunt(){const btn=document.getElementById("huntBtn");btn.disabled=true;btn.textContent="Running…";toast("Job hunt started");try{const res=await privateApi("/api/hunt",{method:"POST"});if(res.status==="already_running"){toast("A hunt is already running","error");}else{const issues=(res.errors||[]).length;toast("Hunt done · "+(res.new_jobs||0)+" new"+(issues?(" · "+issues+" source issues"):""),issues?"error":"success");}await loadAll()}catch(e){toast("Hunt failed: "+e.message,"error")}finally{btn.disabled=false;btn.textContent="⌕ Run job hunt"}}
 async function loadWorkspaceData(){
   if(!privateConnectionReady())return;
-  await Promise.all([loadStats(),loadSources(),loadJobs(),loadCoverage(),loadMarketSummary(),loadReadiness()]);
-  if(privateConnectionReady()){const tab=location.hash.slice(1);if(tab==='applications')await loadApplications();if(tab==='outreach')await loadOutreach()}
+  const tab=location.hash.slice(1);
+  const activeView=tab==='applications'?loadApplications():tab==='outreach'?loadOutreach():Promise.resolve();
+  await Promise.all([activeView,loadStats(),loadSources(),loadJobs(),loadCoverage(),loadMarketSummary(),loadReadiness()]);
   renderWorkspaceState();
 }
 async function loadAll(){await loadPrivateSetup();if(privateConnectionReady())await loadWorkspaceData();else resetPrivateWorkspace()}
