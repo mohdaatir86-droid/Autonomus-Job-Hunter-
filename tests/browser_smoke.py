@@ -112,7 +112,7 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             page.locator('#outreachComposeDialog button').filter(has_text='Close').click()
             page.get_by_role('button',name='Preview / approve',exact=True).click()
             expect(page.locator('#campaignPreviewEmails')).to_contain_text('Follow-up 2')
-            expect(page.locator('#campaignPreviewFacts')).to_contain_text('first_followup_days')
+            expect(page.locator('#campaignPreviewFacts')).to_contain_text('First follow-up: 5 working days')
             page.set_viewport_size({'width':390,'height':844})
             assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth')
             page.screenshot(path=str(output/'campaign-preview-mobile.png'),full_page=True)
@@ -123,6 +123,7 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
                 for name in ['jobs','outreach','applications','sources','settings']:
                     page.locator('.tab[data-tab="'+name+'"]').click()
                     assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth'), f'Mobile overflow: {name} at {width}'
+                    if name=='outreach':assert page.locator('#apolloResults .conn-card').first.bounding_box()['height']<300, 'Recruiter card text is squeezed on mobile'
             page.locator('.tab[data-tab="jobs"]').click()
             page.evaluate('document.activeElement.blur(); window.scrollTo({top:0,behavior:"instant"})')
             expect(page.locator('.brand')).to_be_in_viewport()
