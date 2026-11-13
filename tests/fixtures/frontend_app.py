@@ -5,6 +5,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 import httpx
 import main,job_sources,job_hunter,notify,gmail_alerts,outreach
 import outreach_engine
+import prospeo_provider
 from datetime import datetime,timezone
 outreach_engine.utcnow=lambda:datetime(2026,11,13,5,tzinfo=timezone.utc)
 async def sources(settings):
@@ -29,3 +30,11 @@ gmail_alerts._access_token=token
 outreach._apollo=apollo
 httpx.AsyncClient.post=post
 app=main.app
+
+async def prospeo(path,params):
+    person={'person_id':'fixture-person','full_name':'Recruiter Fixture','current_job_title':'Talent Acquisition','linkedin_url':'https://linkedin.com/in/fixture'}
+    company={'name':'Example Logistics','domain':'example.com'}
+    if path=='search-person':return {'results':[{'person':person,'company':company}]}
+    person['email']={'email':'recruiter@example.com','status':'VERIFIED','revealed':True}
+    return {'person':person,'company':company}
+prospeo_provider.request=prospeo

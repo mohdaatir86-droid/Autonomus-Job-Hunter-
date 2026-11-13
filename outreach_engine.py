@@ -81,6 +81,8 @@ def initialize():
         db.execute('''CREATE TABLE IF NOT EXISTS outreach_enrichment(apollo_id TEXT PRIMARY KEY,
             state TEXT NOT NULL, day TEXT NOT NULL, month TEXT NOT NULL, updated_at TEXT NOT NULL,
             contact_id INTEGER, detail TEXT NOT NULL DEFAULT '')''')
+        db.execute('''CREATE TABLE IF NOT EXISTS outreach_provider_cache(request_key TEXT PRIMARY KEY,
+            state TEXT NOT NULL, result TEXT NOT NULL, updated_at TEXT NOT NULL)''')
         db.execute('''CREATE TABLE IF NOT EXISTS outreach_leads(apollo_id TEXT PRIMARY KEY,
             domain TEXT NOT NULL, searched_at TEXT NOT NULL)''')
         db.execute(f'''CREATE TABLE IF NOT EXISTS outreach_replies(id {identity}, root_id INTEGER NOT NULL,
@@ -299,9 +301,9 @@ def claim_enrichment(identifier):
         daily=db.execute('SELECT COUNT(*) FROM outreach_enrichment WHERE day=?',(day,)).fetchone()[0]
         monthly=db.execute('SELECT COUNT(*) FROM outreach_enrichment WHERE month=?',(month,)).fetchone()[0]
         if daily>=limits['enrichment_daily'] or monthly>=limits['enrichment_monthly']:
-            raise HTTPException(429,'Apollo enrichment budget reached. No reveal request was made.')
+            raise HTTPException(429,'Contact lookup budget reached. No provider request was made.')
         lead=db.execute('SELECT domain FROM outreach_leads WHERE apollo_id=?',(identifier,)).fetchone()
-        if not lead:raise HTTPException(409,'Shortlist this person from a company-domain Apollo search first.')
+        if not lead:raise HTTPException(409,'Shortlist this person from a company-domain provider search first.')
         db.execute("INSERT INTO outreach_enrichment(apollo_id,state,day,month,updated_at) VALUES (?,'pending',?,?,?)",(identifier,day,month,stamp()))
         return lead['domain']
 

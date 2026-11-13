@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1020"><meta name="description" content="Your private workspace for finding operations roles and managing reviewed recruiter outreach."><title>Job Hunter · Career workspace</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script><script src="/static/outreach_campaigns.js" defer></script></head><body>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1020"><meta name="description" content="Your private workspace for finding operations roles and managing reviewed recruiter outreach."><title>Job Hunter · Career workspace</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script><script src="/static/outreach_campaigns.js" defer></script><script src="/static/contact_providers.js" defer></script></head><body>
 <a class="skip-link" href="#mainContent">Skip to workspace</a>
 <div class="app-shell">
 <aside class="sidebar"><a class="brand" href="#jobs" onclick="switchTab('jobs')"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7h14v13H5zM9 7V4h6v3M5 12h14M10 12v3h4v-3" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span><span>CareerOS<small>JOB HUNTER · MISSION CONTROL</small></span></a>
@@ -45,13 +45,13 @@
   <section id="tab-outreach" style="display:none">
     <div class="panel"><div class="panel-header"><div><div class="panel-title">Outreach campaigns</div><div class="panel-sub">Review a finite batch of exact emails, attachments and follow-ups before activation.</div></div><button class="btn btn-ghost btn-sm" onclick="stopAllOutreach()">Stop all outreach</button></div><div class="panel-body">
       <div id="campaignMetrics" class="coverage-grid"></div><p id="campaignProfile" class="profile-note"></p><p id="campaignResume" class="profile-note"></p><p id="campaignTargets" class="profile-note"></p>
-      <details><summary>Sending hours, follow-ups and Apollo budget</summary><div class="profile-grid" style="margin-top:14px">
+      <details><summary>Sending hours, follow-ups and provider budget</summary><div class="profile-grid" style="margin-top:14px">
       <label class="profile-field"><span>Global pause</span><span><input id="rule_paused" type="checkbox" checked> Pause all email sending</span></label>
       <label class="profile-field">Daily reset timezone<input id="rule_timezone" value="Asia/Kolkata"></label>
       <label class="profile-field">Recipient business-hour start<input id="rule_business_start" type="number" min="0" max="23" value="9"></label>
       <label class="profile-field">Recipient business-hour end<input id="rule_business_end" type="number" min="1" max="24" value="18"></label>
-      <label class="profile-field">Daily enrichment lookup cap<input id="rule_enrichment_daily" type="number" min="0" max="100" value="5"></label>
-      <label class="profile-field">Monthly enrichment lookup cap<input id="rule_enrichment_monthly" type="number" min="0" max="1000" value="50"></label>
+      <label class="profile-field">Daily provider lookup cap<input id="rule_enrichment_daily" type="number" min="0" max="100" value="5"></label>
+      <label class="profile-field">Monthly provider lookup cap<input id="rule_enrichment_monthly" type="number" min="0" max="1000" value="50"></label>
       <label class="profile-field">Maximum follow-ups<input id="rule_followups" type="number" min="0" max="2" value="2"></label>
       <label class="profile-field">First follow-up: working days after initial<input id="rule_first_followup_days" type="number" min="1" max="30" value="5"></label>
       <label class="profile-field">Final follow-up: working days after first<input id="rule_final_followup_days" type="number" min="1" max="30" value="7"></label>
@@ -70,9 +70,9 @@
       <div class="profile-grid" style="margin-top:16px">
         <label class="profile-field profile-wide">Campaign<select id="outreachCampaign"><option value="">Individual reviewed email</option></select></label><label class="profile-field profile-wide">Job for this outreach<select id="outreachJob"><option value="">Choose a discovered job</option></select></label>
         <label class="profile-field">Employer website domain<input id="outreachDomain" placeholder="meesho.com" maxlength="253"></label>
-        <div class="profile-field"><span>Search recruiter roles at this employer</span><button class="btn btn-primary btn-sm" onclick="searchApollo()">Search Apollo</button></div>
+        <label class="profile-field">Contact provider<select id="outreachProvider"><option value="prospeo">Prospeo</option><option value="apollo">Apollo</option></select></label><div class="profile-field"><span>Search recruiter roles at this employer</span><button class="btn btn-primary btn-sm" id="providerSearchBtn" onclick="searchContactProvider(this)">Search hiring contacts</button></div>
       </div>
-      <p class="profile-note">Apollo search does not reveal email addresses. Revealing one work email can consume Apollo credits. Personal email and phone enrichment are disabled. Verify current employment: domain matches may include former employers.</p>
+      <p class="profile-note">Prospeo search can cost 1 credit per page; revealing each verified work email can cost 1 additional credit. The shared daily/monthly lookup caps include Prospeo searches and reveals. Saved results prevent repeated requests, including uncertain failures. Personal email and phone enrichment are disabled. Verify current employer and hiring responsibility before approval.</p>
       <div id="apolloResults"></div>
       <details style="margin-top:18px"><summary>Add a business contact from a professional source</summary>
       <div class="profile-grid" style="margin-top:12px"><label class="profile-field">Name<input id="contactName" maxlength="200"></label><label class="profile-field">Business email<input id="contactEmail" type="email" maxlength="254"></label><label class="profile-field">Company<input id="contactCompany" maxlength="200"></label><label class="profile-field">Role<input id="contactRole" maxlength="200"></label><label class="profile-field profile-wide">Professional source URL<input id="contactSource" type="url" placeholder="https://..." maxlength="1500"></label></div><button class="btn btn-ghost btn-sm" onclick="addOutreachContact()">Save unverified contact</button></details>

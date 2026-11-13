@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
     environment=os.environ.copy()
     for key in ['DATABASE_URL','RESEND_API_KEY','GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET']:
         environment.pop(key,None)
-    environment.update(ENABLE_SCHEDULER='false',DATABASE_PATH=str(Path(temporary)/'fixture.sqlite'),PORTAL_ACCESS_TOKEN='fixture-frontend-owner-private-key-00001',APOLLO_API_KEY='fixture-api-key',PYTHONDONTWRITEBYTECODE='1')
+    environment.update(ENABLE_SCHEDULER='false',DATABASE_PATH=str(Path(temporary)/'fixture.sqlite'),PORTAL_ACCESS_TOKEN='fixture-frontend-owner-private-key-00001',APOLLO_API_KEY='fixture-api-key',PROSPEO_API_KEY='fixture-prospeo-key',PYTHONDONTWRITEBYTECODE='1')
     server=subprocess.Popen([sys.executable,'-m','uvicorn','fixtures.frontend_app:app','--app-dir',str(root/'tests'),'--host','127.0.0.1','--port',str(port)],env=environment,cwd=root,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     try:
         deadline=time.monotonic()+20
@@ -78,7 +78,9 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             expect(page.locator('#tab-outreach')).to_be_visible()
             expect(page.locator('#outreachJob')).not_to_have_value('')
             page.locator('#outreachDomain').fill('example.com')
-            page.get_by_role('button',name='Search Apollo',exact=True).click()
+            expect(page.locator('#outreachProvider')).to_have_value('prospeo')
+            page.once('dialog',lambda d:d.accept())
+            page.get_by_role('button',name='Search hiring contacts',exact=True).click()
             expect(page.locator('#apolloResults')).to_contain_text('Recruiter Fixture')
             page.once('dialog',lambda d:d.accept())
             page.locator('#apolloResults button').click()
