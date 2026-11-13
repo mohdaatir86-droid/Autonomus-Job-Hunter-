@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 import main,job_hunter,application_workflow,gmail_alerts,application_state,browser_worker
 import outreach_engine
+import outreach
 from datetime import datetime,timezone
 from test_workflow_regressions import text_pdf
 
@@ -26,6 +27,7 @@ def client(tmp_path,monkeypatch):
     async def token():return 'fixture-access-token'
     monkeypatch.setattr(gmail_alerts,'_access_token',token)
     monkeypatch.setattr(outreach_engine,"utcnow",lambda:datetime(2026,11,13,5,0,tzinfo=timezone.utc))
+    monkeypatch.setattr(outreach,"now",lambda:outreach_engine.utcnow().isoformat())
     with TestClient(main.app) as c:
         outreach_engine.save_settings({"paused":False})
         application_workflow.save_profile({'full_name':'Fixture Candidate','email':'candidate@example.com','headline':'Operations manager','experience_summary':'Led warehouse operations.','skills':['inventory']})
