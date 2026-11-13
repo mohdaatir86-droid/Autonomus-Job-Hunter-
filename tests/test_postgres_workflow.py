@@ -25,6 +25,10 @@ def test_empty_postgres_bootstrap_and_repeatable_workflow(monkeypatch):
             job_sources.ensure_job_columns()
             job_sources.ensure_job_columns()
             assert client.get('/api/jobs', headers=headers).status_code == 200
+            import outreach_program
+            research = outreach_program.save({'enabled':False,'job_found':False})
+            assert research['enabled'] is False
+            assert client.get('/api/outreach/program',headers=headers).json()['targets']
             assert client.post('/api/settings', headers=headers, json={'target_countries':['India']}).json()['target_countries'] == ['India']
     now = job_hunter.now_iso()
     with job_hunter.connect() as conn:

@@ -8,6 +8,7 @@ loadOutreach=async function(){
     const data=await privateApi('/api/outreach/overview');
     if(!privateConnectionReady())return;
     campaignOverview=data;
+    await loadResearchProgram();
     document.getElementById('campaignMetrics').innerHTML=Object.entries(data.counts).map(([k,v])=>'<div class="coverage-item"><strong>'+Number(v)+'</strong><span>'+esc(k==='sent'?'Accepted by Gmail':k.replaceAll('_',' '))+'</span></div>').join('')||'<p>No outreach emails yet.</p>';
     const r=data.rules;
     for(const key of ['timezone','business_start','business_end','enrichment_daily','enrichment_monthly','followups','first_followup_days','final_followup_days'])document.getElementById('rule_'+key).value=r[key];
@@ -58,6 +59,24 @@ verifyOutreachContact=async function(){try{await privateApi('/api/outreach/conta
 // Clear all added private content on logout, including an open campaign snapshot.
 const resetCampaignBase=resetPrivateWorkspace;
 resetPrivateWorkspace=function(){resetCampaignBase();campaignOverview=null;campaignPreview=null;for(const id of ['campaignProfile','campaignResume','campaignTargets','campaignList','campaignReplies','campaignMetrics','batchPreparation','campaignPreviewFacts','campaignPreviewEmails']){const el=document.getElementById(id);if(el)el.textContent='';}document.getElementById('campaignPreviewDialog')?.close();};
+
+async function loadResearchProgram(){
+  try{const p=await privateApi('/api/outreach/program');if(!privateConnectionReady())return;
+    document.getElementById('programTargets').value=p.targets.map(t=>[t.company,t.domain,t.source_url].join(' | ')).join('\n');
+    document.getElementById('programStatus').textContent=(p.job_found?'JOB FOUND · STOPPED':p.enabled?'ON · DAILY RESEARCH & DRAFTS':'PAUSED')+' · '+p.message;
+    document.getElementById('programShortlists').innerHTML=(p.shortlist||[]).map(t=>'<div class="conn-card"><div><strong>'+esc(t.company)+'</strong><p>'+esc(t.domain)+' · '+Number(t.lead_count)+' hiring leads · '+esc(t.searched_at)+'</p></div><button class="btn btn-ghost btn-sm" data-domain="'+esc(t.domain)+'" onclick="openProgramShortlist(this.dataset.domain)">Review cached hiring shortlist</button></div>').join('');
+  }catch(e){document.getElementById('programStatus').textContent=e.message;}
+}
+async function saveResearchProgram(enabled){
+  try{const targets=document.getElementById('programTargets').value.trim().split('\n').filter(Boolean).map(line=>{const [company,domain,source_url]=line.split('|').map(x=>x.trim());return {company,domain,source_url};});
+    await privateApi('/api/outreach/program',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled,job_found:false,targets})});await loadResearchProgram();
+  }catch(e){toast(e.message,'error');}
+}
+async function runResearchProgram(){try{const r=await privateApi('/api/outreach/program/run',{method:'POST'});toast(r.message||r.blocked||r.skipped);await loadOutreach();}catch(e){toast(e.message,'error');}}
+async function jobSearchCompleted(){try{await privateApi('/api/outreach/program',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_found:true})});await loadOutreach();toast('Job search and queued outreach stopped.');}catch(e){toast(e.message,'error');}}
+async function openProgramShortlist(domain){document.getElementById('outreachDomain').value=domain;document.getElementById('outreachProvider').value='prospeo';await searchContactProvider(document.getElementById('providerSearchBtn'));}
+const resetResearchBase=resetPrivateWorkspace;
+resetPrivateWorkspace=function(){resetResearchBase();for(const id of ['programTargets','programStatus','programShortlists']){const el=document.getElementById(id);if(el){el.textContent='';if('value' in el)el.value='';}}};
 
 async function prepareMatchedOutreach(){try{const r=await privateApi('/api/outreach/prepare-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('campaignName').value||'Matched vacancy applications'})});document.getElementById('batchPreparation').textContent=r.blocked||('Prepared '+r.prepared+' contacts. Review the exact batch before activation.');if(r.pending_contacts?.length)document.getElementById('batchPreparation').textContent+=' Contacts needed: '+r.pending_contacts.map(j=>j.title+' at '+j.company).join('; ');await loadOutreach();if(r.campaign_id)await previewCampaign(r.campaign_id);}catch(e){toast(e.message,'error');}}
 

@@ -8,9 +8,19 @@ import gmail_alerts
 import outreach_engine as engine
 import resume_store
 import prospeo_provider
+import outreach_program
 from fastapi.responses import Response
 
 router=APIRouter()
+
+@router.get('/api/outreach/program')
+def program_status():return outreach_program.get()
+
+@router.post('/api/outreach/program')
+def program_save(payload:dict):return outreach_program.save(payload)
+
+@router.post('/api/outreach/program/run')
+async def program_run():return await outreach_program.tick()
 
 @router.get('/api/outreach/status')
 def status():
