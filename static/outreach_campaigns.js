@@ -2,13 +2,11 @@
 let campaignOverview=null,campaignPreview=null;
 const outreachLoadBase=loadOutreach;
 loadOutreach=async function(){
-  await outreachLoadBase();
   if(!privateConnectionReady())return;
   try{
-    const data=await privateApi('/api/outreach/overview');
+    const [,data]=await Promise.all([outreachLoadBase(),privateApi('/api/outreach/overview'),loadResearchProgram()]);
     if(!privateConnectionReady())return;
     campaignOverview=data;
-    await loadResearchProgram();
     document.getElementById('campaignMetrics').innerHTML=Object.entries(data.counts).map(([k,v])=>'<div class="coverage-item"><strong>'+Number(v)+'</strong><span>'+esc(k==='sent'?'Accepted by Gmail':k.replaceAll('_',' '))+'</span></div>').join('')||'<p>No outreach emails yet.</p>';
     const r=data.rules;
     for(const key of ['timezone','business_start','business_end','enrichment_daily','enrichment_monthly','followups','first_followup_days','final_followup_days'])document.getElementById('rule_'+key).value=r[key];
@@ -25,14 +23,12 @@ loadOutreach=async function(){
     const filter=document.getElementById('queueCampaignFilter'),savedFilter=filter.value;
     filter.innerHTML='<option value="">All campaigns</option>'+data.campaigns.map(c=>'<option value="'+Number(c.id)+'">'+esc(c.name)+'</option>').join('');filter.value=savedFilter;
     renderCampaignQueue();
-    document.getElementById('campaignReplies').innerHTML=data.replies.map(r=>'<article class="conn-card"><div><strong>'+esc(r.category.replaceAll('_',' '))+'</strong><p>'+esc(r.snippet)+'</p><p class="profile-note">Suggested reply — edit and send manually: '+esc(r.suggested_reply)+'</p></div></article>').join('')||'<p>No tracked replies. Reply sync checks only sent outreach threads and related delivery notices.</p>';
+    if(typeof renderFocusedOutreach==='function'){renderFocusedOutreach(data);renderFocusedCampaigns(data);}
+    document.getElementById('campaignReplies').innerHTML=data.replies.map(r=>'<article class="conn-card"><div><strong>'+esc(r.category.replaceAll('_',' '))+'</strong><p>'+esc(r.snippet)+'</p><p class="profile-note">Suggested reply — edit and send manually: '+esc(r.suggested_reply)+'</p></div></article>').join('')||'<div class="panel queue-empty"><span class="empty-icon" aria-hidden="true">↩</span><h3>Your conversations will appear here</h3><p>Once you send an approved email, check here for replies and next steps.</p></div>';
   }catch(e){document.getElementById('campaignStorage').textContent=e.message;}
 };
-function renderCampaignQueue(){
-  const campaign=document.getElementById('queueCampaignFilter').value;
-  const state=document.getElementById('queueStateFilter').value;
-  document.getElementById('outreachQueue').innerHTML=outreachDrafts.filter(d=>(!campaign||String(d.campaign_id)===campaign)&&(!state||d.state===state)).map(d=>'<tr><td>'+esc(d.recipient_email)+'<div class="job-meta">'+esc(d.target_company||'')+' · '+(d.step_number?'Follow-up '+d.step_number:'Initial email')+'</div></td><td>'+esc(d.subject)+'</td><td>'+esc(d.state==='sent'?'Accepted by Gmail':d.state)+(d.due_at?'<div class="job-meta">Due '+esc(new Date(d.due_at).toLocaleString())+'</div>':'')+(d.response_status?'<div>'+esc(d.response_status)+'</div>':'')+(d.error?'<div class="job-meta">'+esc(d.error)+'</div>':'')+'</td><td><button class="btn btn-ghost btn-sm" onclick="openOutreachDraft('+Number(d.id)+')">Review</button></td></tr>').join('')||'<tr><td colspan="4">No matching email drafts.</td></tr>';
-}
+function renderCampaignQueue(){if(typeof renderFocusedQueue==='function')renderFocusedQueue();}
+
 async function createCampaign(){
   try{const c=await privateApi('/api/outreach/campaigns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('campaignName').value,kind:document.getElementById('campaignKind').value})});await loadOutreach();document.getElementById('outreachCampaign').value=c.id;toast('Draft campaign created. Prepare its contact emails next.','success');}catch(e){toast(e.message,'error');}
 }
@@ -63,6 +59,7 @@ resetPrivateWorkspace=function(){resetCampaignBase();campaignOverview=null;campa
 
 async function loadResearchProgram(){
   try{const p=await privateApi('/api/outreach/program');if(!privateConnectionReady())return;
+    if(typeof renderResearchSignal==='function')renderResearchSignal(p);
     document.getElementById('programTargets').value=p.targets.map(t=>[t.company,t.domain,t.source_url].join(' | ')).join('\n');
     document.getElementById('programStatus').textContent=(p.job_found?'JOB FOUND · STOPPED':p.enabled?'ON · DAILY RESEARCH & DRAFTS':'PAUSED')+' · '+p.message;
     document.getElementById('programShortlists').innerHTML=(p.shortlist||[]).map(t=>'<div class="conn-card"><div><strong>'+esc(t.company)+'</strong><p>'+esc(t.domain)+' · '+Number(t.lead_count)+' hiring leads · '+esc(t.searched_at)+'</p></div><button class="btn btn-ghost btn-sm" data-domain="'+esc(t.domain)+'" onclick="openProgramShortlist(this.dataset.domain)">Review cached hiring shortlist</button></div>').join('');
