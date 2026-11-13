@@ -72,7 +72,7 @@ async function saveResearchProgram(enabled){
 }
 async function runResearchProgram(){try{const r=await privateApi('/api/outreach/program/run',{method:'POST'});toast(r.message||r.blocked||r.skipped);await loadOutreach();}catch(e){toast(e.message,'error');}}
 async function jobSearchCompleted(){try{await privateApi('/api/outreach/program',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_found:true})});await loadOutreach();toast('Job search and queued outreach stopped.');}catch(e){toast(e.message,'error');}}
-async function openProgramShortlist(domain){document.getElementById('outreachDomain').value=domain;document.getElementById('outreachProvider').value='prospeo';await searchContactProvider(document.getElementById('providerSearchBtn'));}
+async function openProgramShortlist(domain){openRecruiterSearch();document.getElementById('outreachDomain').value=domain;document.getElementById('outreachProvider').value='prospeo';await searchContactProvider(document.getElementById('providerSearchBtn'));}
 const resetResearchBase=resetPrivateWorkspace;
 resetPrivateWorkspace=function(){resetResearchBase();for(const id of ['programTargets','programStatus','programShortlists']){const el=document.getElementById(id);if(el){el.textContent='';if('value' in el)el.value='';}}};
 

@@ -8,7 +8,7 @@ function openOutreachView(view){
 }
 function openCampaignCreator(){openOutreachView('campaigns');document.getElementById('campaignCreator').open=true;document.getElementById('campaignName').focus();}
 function openRecruiterSearch(){openOutreachView('contacts');document.getElementById('recruiterSearch').open=true;document.getElementById('outreachDomain').focus();}
-function filterOutreachState(state){openOutreachView('drafts');document.getElementById('queueStateFilter').value=state;document.getElementById('queueShowFollowups').checked=true;renderCampaignQueue();}
+function filterOutreachState(state){openOutreachView('drafts');document.getElementById('queueStateFilter').value=state;document.getElementById('queueShowFollowups').checked=state!=='draft';renderCampaignQueue();}
 function renderResearchSignal(program){const el=document.getElementById('focusedResearch');if(!el)return;el.textContent=program.job_found?'Job search stopped':program.enabled?'Research on':'Research paused';el.className='signal-chip '+(program.enabled&&!program.job_found?'on':'');}
 function renderFocusedOutreach(data){
   const drafts=outreachDrafts||[],roots=drafts.filter(d=>!d.step_number);
