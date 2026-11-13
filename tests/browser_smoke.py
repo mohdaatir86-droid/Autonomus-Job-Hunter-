@@ -164,6 +164,9 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
                         assert status['y']>=subject['y']+subject['height']-1, 'Mobile status must not overlap the email preview'
                         expect(page.locator('#toast')).not_to_have_class(re.compile(r'\bshow\b'))
                         page.evaluate('document.activeElement.blur(); window.scrollTo({top:0,behavior:"instant"})')
+                        if width>=390:
+                            navigation=page.locator('#mainTabs').bounding_box()
+                            assert row.bounding_box()['y']<navigation['y']-40, 'Show the first email before the bottom navigation on iPhone'
                         page.screenshot(path=str(output/f'outreach-focused-{width}.png'),full_page=False)
             page.locator('.tab[data-tab="jobs"]').click()
             page.evaluate('document.activeElement.blur(); window.scrollTo({top:0,behavior:"instant"})')
