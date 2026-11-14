@@ -66,16 +66,7 @@ def init_workflow_db():
                     json.dumps(DEFAULT_PROFILE["skills"]), _now(),
                 ),
             )
-        elif not (row["full_name"] or "").strip() and not (row["email"] or "").strip():
-            conn.execute(
-                """UPDATE candidate_profile SET full_name=?, email=?, phone=?, linkedin_url=?,
-                   headline=?, experience_summary=?, skills=?, updated_at=? WHERE id=1""",
-                (
-                    DEFAULT_PROFILE["full_name"], DEFAULT_PROFILE["email"], DEFAULT_PROFILE["phone"],
-                    DEFAULT_PROFILE["linkedin_url"], DEFAULT_PROFILE["headline"], DEFAULT_PROFILE["experience_summary"],
-                    json.dumps(DEFAULT_PROFILE["skills"]), _now(),
-                ),
-            )
+
 
 
 def get_profile():

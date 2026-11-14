@@ -49,10 +49,26 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             page.locator('#profileName').fill('Fixture Candidate')
             page.locator('#profileEmail').fill('candidate@example.com')
             page.locator('#profileExperience').fill('Led multi-site warehouse operations and inventory planning.')
+            # Delay the save response to reproduce a user choosing a PDF while
+            # profile saving is still pending. The upload must join that save.
+            pending_profile=[]
+            uploads=[]
+            def delay_profile_save(route):
+                if route.request.method=='POST':
+                    pending_profile.append((route,route.fetch()))
+                else:route.continue_()
+            page.route('**/api/profile',delay_profile_save)
+            page.on('request',lambda request:uploads.append(request.url) if request.url==base+'/api/profile/resume' else None)
             page.locator('#saveProfileBtn').click()
             page.locator('#resumeFile').set_input_files({'name':'fixture-resume.pdf','mimeType':'application/pdf','buffer':text_pdf('Fixture Candidate Operations Manager warehouse inventory')})
             page.locator('#uploadResumeBtn').click()
+            expect(page.locator('#resumeStatus')).to_contain_text('Uploading')
+            assert len(pending_profile)==1
+            assert uploads==[], 'PDF upload must wait for the pending profile save'
+            with page.expect_request(base+'/api/profile/resume'):
+                pending_profile[0][0].fulfill(response=pending_profile[0][1])
             expect(page.locator('#profileState')).to_have_text('PROFILE READY')
+            page.unroute('**/api/profile',delay_profile_save)
             expect(page.locator('#missionResume')).to_have_text('Resume ready')
             page.locator('#searchPreferences summary').click()
             page.locator('#targetDays').fill('7')

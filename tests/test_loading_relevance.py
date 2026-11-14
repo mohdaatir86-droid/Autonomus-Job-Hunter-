@@ -139,3 +139,16 @@ def test_irrelevant_legacy_jobs_are_hidden_without_losing_tracked_history(tmp_pa
     assert job_sources.get_stats()['total_jobs'] == 1
     assert job_sources.get_stats()['high_match_jobs'] == 1
     assert len(job_sources.list_jobs(status='saved', min_score=0)) == 1
+
+
+def test_bootstrap_preserves_partial_profile_fields(tmp_path, monkeypatch):
+    import application_workflow
+    path = str(tmp_path / 'partial-profile.sqlite')
+    monkeypatch.delenv('DATABASE_URL', raising=False)
+    monkeypatch.setenv('DATABASE_PATH', path)
+    monkeypatch.setattr(application_workflow, 'DB_PATH', path)
+    application_workflow.init_workflow_db()
+    with application_workflow._connect() as db:
+        db.execute("UPDATE candidate_profile SET headline='Operations leader' WHERE id=1")
+    application_workflow.init_workflow_db()
+    assert application_workflow.get_profile()['headline'] == 'Operations leader'
