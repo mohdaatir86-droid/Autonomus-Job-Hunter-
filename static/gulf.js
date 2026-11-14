@@ -9,6 +9,7 @@ function selectJobMarket(gulf){
   document.getElementById('filterCountry').value='';
   document.getElementById('filterPosted').disabled=gulfOpenView;
   document.getElementById('filterScore').value=gulfOpenView?'0':'65';
+  document.querySelectorAll('.chip[data-score]').forEach(chip=>chip.classList.toggle('active',chip.dataset.score===document.getElementById('filterScore').value));
   document.getElementById('filterSource').value='';
   document.getElementById('filterStatus').value='';
   loadJobs();

@@ -978,7 +978,7 @@ def sources():
     greenhouse_env = bool(os.getenv("GREENHOUSE_BOARDS", "").strip())
     catalog = [
         {"name": "Gulf employer feeds", "type": "Public employer ATS", "configured": True,
-         "connection_mode": "Delivery Hero / Talabat, Careem, Lalamove, GMG, Aramex, Al-Futtaim, DP World and Landmark; six Gulf countries; no key"},
+         "connection_mode": "Delivery Hero / Talabat, Careem, Lalamove, GMG, Aramex, Al-Futtaim, DP World, Landmark, Snoonu, Amazon, Alshaya, DHL and Majid Al Futtaim; six Gulf countries; no key"},
         {"name": "Arbeitnow", "type": "Public job API", "configured": True, "connection_mode": "Public API, no key"},
         {"name": "Remotive", "type": "Public job API", "configured": True, "connection_mode": "Public API, operations category"},
         {"name": "Jobicy", "type": "Public job API", "configured": True, "connection_mode": "Public API, no key"},

@@ -727,6 +727,10 @@ async def _hunt_jobs_locked(gulf_only=False):
             if gulf_verified:
                 if not fit(job, gulf_profile, settings)[0]:
                     continue
+                # The explicitly requested Gulf view includes all six countries,
+                # independently of older saved-country preferences.
+                gulf_scoring = {**settings, "target_countries": list(dict.fromkeys(settings.get("target_countries", []) + GULF_COUNTRIES))}
+                score, reasons, country = score_job(job, gulf_scoring)
             elif not is_relevant_role(job) or country not in settings.get("target_countries", DEFAULT_COUNTRIES) or not is_target_market_job(job, country) or not matches_preferences({**job, "country": country}, settings):
                 continue
             sources_touched.add(job.get("source") or "?")

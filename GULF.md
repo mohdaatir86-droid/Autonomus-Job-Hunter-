@@ -5,15 +5,15 @@ Arabia, Qatar, Kuwait, Oman and Bahrain. It does not overwrite saved preferences
 
 ## Coverage
 
-The private source catalog contains 22 entries. Eight entries have direct public
+The private source catalog contains 22 entries. Thirteen entries have direct public
 imports: Delivery Hero (publisher-provided brands including Talabat), Careem,
-Lalamove, GMG, Aramex, Al-Futtaim, DP World and Landmark Group. SmartRecruiters uses its documented Posting API.
+Lalamove, GMG, Aramex, Al-Futtaim, DP World, Landmark Group, Snoonu, Amazon, Alshaya, DHL and Majid Al Futtaim. SmartRecruiters uses its documented Posting API.
 Greenhouse, Lever and employer RSS need no API key. Aramex RSS contains a bounded
 selection and is explicitly reported as partial coverage. Zero matching vacancies
 is valid and must not be filled with unrelated jobs.
 
 Seven job boards retain their existing Google Jobs / authorised email-alert
-coverage. Seven other employer pages, including Noon, are external career links,
+coverage. Two other employer pages, including Noon, are external career links,
 not direct integrations. Kitopi's employer-linked Lever board returned 404 during
 inspection; it is deliberately not presented as working. Site presence in the
 catalog never promises comprehensive coverage or that every job is open.
@@ -64,3 +64,21 @@ expired posting dates are excluded; explicit closing times override the 36-hour
 evidence lifetime. Operations search is bounded at 400 rows and 30 shortlisted
 details per employer, with partial coverage reported. Provider groups run together
 with individual 60-second budgets so a slow source does not block other imports.
+
+Snoonu uses the public active-job endpoint linked from its official Keka embed
+script. Tenant and host are fixed; no candidate or recruiter API is accessed.
+Structured experience ranges are checked alongside full descriptions, locations
+use explicit country codes, and invalid/future publication dates are excluded.
+Technical leadership titles remain outside the operations shortlist. Recognised
+store/regional leadership titles receive operations-role scoring only where the
+job description confirms physical operations context.
+
+Amazon imports use the public job-search JSON with explicit Gulf ISO3 codes and
+original basic/preferred qualifications. Alshaya imports use the employer's
+published listing links, job fields and an Apply now control. Phenom employers
+(DHL and Majid Al Futtaim) use public HTML-embedded JSON only, with a bounded
+60-result global scan and separate external active-job detail validation. These
+scans are explicitly partial and can return zero relevant jobs; search teasers
+and hidden closed-job templates alone never establish availability. No webpage
+JavaScript is executed. Noon and Kitopi remain external links until a reliable
+employer-authorised direct source is verified.

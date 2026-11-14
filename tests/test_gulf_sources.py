@@ -262,3 +262,44 @@ def test_alfuttaim_rss_country_only_location_is_not_guessed():
     assert len(rows)==1 and error==[]
     assert rows[0]['location']=='United Arab Emirates'
     assert rows[0]['country']=='United Arab Emirates'
+
+
+def test_snoonu_only_active_gulf_ops_with_explicit_experience_and_real_dates():
+    jobs=[{'id':1,'title':'Vertical Operations Director','description':'Warehouse operations and multi-site fulfilment inventory SOP. Minimum 5 years of experience.',
+           'jobLocations':[{'city':'Lusail','countryCode':'QA'}],'publishedOn':'2026-01-01T00:00:00Z','jobType':2},
+          {'id':2,'title':'Tech Lead – Logistics Systems','description':'Warehouse logistics software engineering','jobLocations':[{'city':'Lusail','countryCode':'QA'}]},
+          {'id':3,'title':'Operations Manager','description':'Warehouse operations logistics leadership','jobLocations':[{'city':'Lahore','countryCode':'PK'}]},
+          {'id':4,'title':'Operations Manager','description':'Warehouse operations logistics. '+('x '*10000),'experience':'5-7', 'jobLocations':[{'city':'Lusail','countryCode':'QA'}]},
+          {'id':5,'title':'Operations Manager','description':'Warehouse operations','jobLocations':[{'city':'Lusail','countryCode':'QA'}],'publishedOn':'2099-01-01'},
+          {'id':'../../private','title':'Operations Manager','description':'Warehouse operations','jobLocations':[{'countryCode':'QA'}]}]
+    calls=[]
+    def handler(request):calls.append(str(request.url));return httpx.Response(200,json=jobs)
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await gulf.fetch_snoonu(c,PROFILE,SETTINGS)
+    rows,errors=asyncio.run(run())
+    assert len(rows)==1 and not errors
+    assert rows[0]['country']=='Qatar' and rows[0]['posted_at'].startswith('2026-01-01')
+    assert gulf.current_evidence(rows[0])
+    assert gulf.evidence(rows[0])['apply_url']=='https://snoonu.keka.com/careers/jobdetails/1'
+    assert len(calls)==1 and '/active/' in calls[0]
+
+
+def test_known_retail_leadership_is_ranked_with_physical_context_only():
+    settings={'target_countries':['Qatar']}
+    physical='Multi-site warehouse operations, fulfilment, inventory, workforce, SLA and KPI. Store operations cost control.'
+    regional=job('Regional Concept Business Head - Home Centre',physical)
+    store=job('Store Manager',physical)
+    tech=job('Tech Lead – Logistics Systems',physical+' software engineering')
+    assert job_hunter.score_job(regional,settings)[0]>job_hunter.score_job(store,settings)[0]>24
+    assert job_hunter.score_job(tech,settings)[0]<=12
+    assert not job_hunter.is_relevant_role(tech)
+    assert job_hunter.score_job(job('Regional Concept Business Head - Home Centre','Business strategy only'),settings)[0]<=24
+
+
+def test_snoonu_bad_response_cannot_claim_working_or_infer_countries():
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req:httpx.Response(200,json={'error':'changed'}))) as c:
+            return await gulf.fetch_snoonu(c,PROFILE,SETTINGS)
+    rows,errors=asyncio.run(run())
+    assert rows==[] and errors
