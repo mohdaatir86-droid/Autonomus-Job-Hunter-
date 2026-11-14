@@ -5,15 +5,15 @@ Arabia, Qatar, Kuwait, Oman and Bahrain. It does not overwrite saved preferences
 
 ## Coverage
 
-The private source catalog contains 22 entries. Five entries have direct public
+The private source catalog contains 22 entries. Eight entries have direct public
 imports: Delivery Hero (publisher-provided brands including Talabat), Careem,
-Lalamove, GMG and Aramex. SmartRecruiters uses its documented Posting API.
+Lalamove, GMG, Aramex, Al-Futtaim, DP World and Landmark Group. SmartRecruiters uses its documented Posting API.
 Greenhouse, Lever and employer RSS need no API key. Aramex RSS contains a bounded
 selection and is explicitly reported as partial coverage. Zero matching vacancies
 is valid and must not be filled with unrelated jobs.
 
 Seven job boards retain their existing Google Jobs / authorised email-alert
-coverage. Ten other employer pages, including Noon, are external career links,
+coverage. Seven other employer pages, including Noon, are external career links,
 not direct integrations. Kitopi's employer-linked Lever board returned 404 during
 inspection; it is deliberately not presented as working. Site presence in the
 catalog never promises comprehensive coverage or that every job is open.
@@ -55,3 +55,12 @@ private API access, URL safety, evidence expiry, duplicate refreshes, preserved
 history and source reports, and discovery lease recovery. Browser fixtures mock
 all Gulf imports and test the detail/apply flow and 375px layout, alongside the
 existing 375/390/430px smoke checks. No tests contact recruiters or paid providers.
+
+Oracle employer imports use documented public CE published-vacancy search and
+ById details, scoped to the two fixed employer sites and published requisition IDs.
+Only external job description / responsibilities / qualifications are retained.
+Gulf country codes must agree between listing and detail. Invalid, future or
+expired posting dates are excluded; explicit closing times override the 36-hour
+evidence lifetime. Operations search is bounded at 400 rows and 30 shortlisted
+details per employer, with partial coverage reported. Provider groups run together
+with individual 60-second budgets so a slow source does not block other imports.

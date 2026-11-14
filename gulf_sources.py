@@ -20,12 +20,12 @@ CATALOG = [
     ('Noon', 'https://www.linkedin.com/company/nooncom/jobs', 'external', 'Official company jobs on LinkedIn; access may require login'),
     ('Snoonu', 'https://snoonu.keka.com/careers', 'external', 'Official employer career board'),
     ('Kitopi', 'https://www.kitopi.com/careers', 'external', 'Employer career page; linked Lever board returned 404, not an active feed'),
-    ('DP World', 'https://ehpv.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'external', 'Official employer Oracle career board'),
-    ('Landmark Group', 'https://efhi.fa.em3.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'external', 'Official employer Oracle career board'),
+    ('DP World', 'https://ehpv.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'direct', 'Public employer Oracle career feed; operations search with published detail checks'),
+    ('Landmark Group', 'https://efhi.fa.em3.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'direct', 'Public employer Oracle career feed; operations search with published detail checks'),
     ('Aramex', 'https://careers.aramex.com/search/?q=operations', 'direct', 'Employer RSS; bounded published selection, not every vacancy'),
     ('DHL', 'https://careers.dhl.com/global/en/search-results', 'external', 'Official employer career search'),
     ('Alshaya', 'https://www.alshaya.com/english/careers/vacancies/', 'external', 'Official employer vacancies'),
-    ('Al-Futtaim', 'https://www.alfuttaim.com/en/careers/', 'external', 'Official employer careers'),
+    ('Al-Futtaim', 'https://www.afuturewithus.com/search/?q=operations', 'direct', 'Official employer RSS; bounded operations search selection'),
     ('Majid Al Futtaim', 'https://careers.majidalfuttaim.com/global/en/search-results', 'external', 'Official employer career search'),
     ('GMG', 'https://careers.gmg.com/jobs', 'direct', 'Employer RSS with published job descriptions and explicit job locations'),
     ('Amazon Operations', 'https://www.amazon.jobs/content/en/teams/fulfillment-and-operations/fulfillment-center-management', 'external', 'Official operations career hub; select Gulf location'),
@@ -90,7 +90,8 @@ def fit(job, profile, settings):
 
 def evidence(job):
     try:
-        return json.loads(job.get('raw_json') or '{}').get('_gulf', {})
+        data = json.loads(job.get('raw_json') or '{}').get('_gulf', {})
+        return data if isinstance(data, dict) else {}
     except (ValueError, TypeError, AttributeError):
         return {}
 
@@ -101,6 +102,7 @@ def current_evidence(job, now=None):
         checked = datetime.fromisoformat(meta['checked_at'])
         age = (now or datetime.now(timezone.utc)) - checked
         return (meta.get('state') == 'published' and timedelta(0) <= age < timedelta(hours=36)
+                and (not meta.get('valid_until') or (now or datetime.now(timezone.utc)) < datetime.fromisoformat(meta['valid_until']))
                 and safe_apply_url(meta.get('apply_url', '')))
     except (KeyError, TypeError, ValueError):
         return False
@@ -112,15 +114,16 @@ def safe_apply_url(url):
         return p.scheme == 'https' and not p.username and not p.password and (p.port in (None, 443)) and p.hostname in {
             'jobs.smartrecruiters.com', 'careers.smartrecruiters.com', 'job-boards.greenhouse.io',
             'boards.greenhouse.io', 'boards.eu.greenhouse.io', 'jobs.lever.co', 'careers.careem.com',
-            'careers.gmg.com', 'careers.aramex.com'}
+            'careers.gmg.com', 'careers.aramex.com', 'www.afuturewithus.com',
+            'ehpv.fa.em2.oraclecloud.com', 'efhi.fa.em3.oraclecloud.com'}
     except (ValueError, TypeError):
         return False
 
 
-def mark(job, apply_url, checked_at):
+def mark(job, apply_url, checked_at, valid_until=None):
     if job and safe_apply_url(apply_url):
         job['raw_json'] = json.dumps({'_gulf': {'state': 'published', 'checked_at': checked_at,
-            'apply_url': apply_url, 'basis': 'Employer public published-vacancy feed. Availability can change; check the application page.'}})
+            'apply_url': apply_url, 'valid_until': valid_until, 'basis': 'Employer public published-vacancy feed. Availability can change; check the application page.'}})
     return job
 
 
@@ -184,7 +187,7 @@ async def fetch_gulf_sources(client, settings):
     from application_workflow import get_profile_full
     from job_sources import _clean_job
     profile = get_profile_full()
-    jobs, errors = await fetch_smartrecruiters(client, profile, settings)
+    jobs, errors = [], []
     checked = datetime.now(timezone.utc).isoformat()
 
     async def employer(name, url):
@@ -209,12 +212,23 @@ async def fetch_gulf_sources(client, settings):
             errors.append(f'{name}: public feed unavailable; no new verified roles imported')
         return found
     import httpx
-    for result in await asyncio.gather(employer('Careem', 'https://boards-api.greenhouse.io/v1/boards/careem/jobs?content=true'),
-                                      employer('Lalamove', 'https://api.lever.co/v0/postings/lalamove')):
-        jobs.extend(result)
-    rss_jobs, rss_errors = await fetch_rss_employers(client, profile, settings)
-    jobs.extend(rss_jobs)
-    errors.extend(rss_errors)
+    async def bounded(name, operation):
+        try:
+            return await asyncio.wait_for(operation, timeout=60)
+        except (TimeoutError, httpx.HTTPError, ValueError, TypeError, KeyError):
+            return [], [f'{name}: provider time budget or response validation failed; coverage is partial']
+
+    smart, oracle, rss, careem, lalamove = await asyncio.gather(
+        bounded('SmartRecruiters', fetch_smartrecruiters(client, profile, settings)),
+        bounded('Oracle careers', fetch_oracle_employers(client, profile, settings)),
+        bounded('Employer RSS', fetch_rss_employers(client, profile, settings)),
+        employer('Careem', 'https://boards-api.greenhouse.io/v1/boards/careem/jobs?content=true'),
+        employer('Lalamove', 'https://api.lever.co/v0/postings/lalamove'))
+    for rows, issues in (smart, oracle, rss):
+        jobs.extend(rows)
+        errors.extend(issues)
+    jobs.extend(careem)
+    jobs.extend(lalamove)
     return jobs, '; '.join(dict.fromkeys(errors)) or None
 
 
@@ -227,7 +241,8 @@ async def fetch_rss_employers(client, profile, settings):
     import httpx
     checked = datetime.now(timezone.utc).isoformat()
     feeds = [('GMG', 'https://careers.gmg.com/jobs.rss', 'careers.gmg.com'),
-             ('Aramex', 'https://careers.aramex.com/services/rss/job/?locale=en_US&keywords=(operations)', 'careers.aramex.com')]
+             ('Aramex', 'https://careers.aramex.com/services/rss/job/?locale=en_US&keywords=(operations)', 'careers.aramex.com'),
+             ('Al-Futtaim', 'https://www.afuturewithus.com/services/rss/job/?locale=en_GB&keywords=(operations)', 'www.afuturewithus.com')]
     errors = []
     async def fetch(name, url, host):
         jobs = []
@@ -252,10 +267,10 @@ async def fetch_rss_employers(client, profile, settings):
                         continue
                     location = ', '.join(filter(None, [loc.findtext(namespace+'city'), loc.findtext(namespace+'country')]))
                 else:
-                    match = re.search(r'\(([^()]+),\s*(AE|SA|QA|KW|OM|BH)\)\s*$', title)
+                    match = re.search(r'\((?:([^()]+),\s*)?(AE|SA|QA|KW|OM|BH)\)\s*$', title)
                     if not match:
                         continue
-                    location = match[1] + ', ' + COUNTRIES[match[2].lower()]
+                    location = ((match[1] + ', ') if match[1] else '') + COUNTRIES[match[2].lower()]
                 posted = None
                 if item.findtext('pubDate'):
                     try:
@@ -266,10 +281,100 @@ async def fetch_rss_employers(client, profile, settings):
                     'location': location, 'description': html.unescape(item.findtext('description', '')), 'url': url, 'date': posted}, 'Employer RSS/'+name)
                 if row and fit(row, profile, settings)[0]:
                     jobs.append(mark(row, url, checked))
-            if len(items) >= (20 if name == 'Aramex' else 300):
+            if len(items) >= (20 if name != 'GMG' else 300):
                 errors.append(f'{name}: RSS publishes a bounded selection; coverage is partial')
         except (httpx.HTTPError, ValueError, ET.ParseError, TypeError):
             errors.append(f'{name}: RSS unavailable; no new verified roles imported')
         return jobs
     groups = await asyncio.gather(*(fetch(*feed) for feed in feeds))
     return [row for rows in groups for row in rows], errors
+
+
+ORACLE_EMPLOYERS = (
+    ('DP World', 'ehpv.fa.em2.oraclecloud.com'),
+    ('Landmark Group', 'efhi.fa.em3.oraclecloud.com'),
+)
+
+
+async def fetch_oracle_employers(client, profile, settings):
+    """Only externally published IDs from fixed employer career sites are read.
+
+    Details use documented CE ById, not internal candidate/recruiter resources.
+    Dates and country must agree; a posting's explicit closing time overrides TTL.
+    """
+    import httpx
+    from job_sources import _clean_job, _parse_iso
+    moment = datetime.now(timezone.utc)
+    checked = moment.isoformat()
+    semaphore = asyncio.Semaphore(4)
+    errors = []
+
+    async def request(host, resource, finder, expand=None):
+        params = {'onlyData': 'true', 'finder': finder}
+        if expand:
+            params['expand'] = expand
+        async with semaphore:
+            response = await client.get(f'https://{host}/hcmRestApi/resources/11.13.18.05/{resource}',
+                                        params=params, timeout=15, follow_redirects=False)
+            response.raise_for_status()
+            return response.json()
+
+    def valid_dates(start, end):
+        parsed_start, parsed_end = _parse_iso(start), _parse_iso(end)
+        if start and not parsed_start or end and not parsed_end:
+            return False
+        return not (parsed_start and parsed_start > checked or parsed_end and parsed_end <= checked)
+
+    async def employer(name, host):
+        async def page(offset):
+            try:
+                data = await request(host, 'recruitingCEJobRequisitions',
+                    f'findReqs;siteNumber=CX_1,keyword=operations,limit=100,offset={offset}', 'requisitionList')
+                return data['items'][0]
+            except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError):
+                errors.append(f'{name}: a published-vacancy page is unavailable; coverage is partial')
+                return {}
+        first = await page(0)
+        count = int(first.get('TotalJobsCount', 0))
+        pages = [first] + await asyncio.gather(*(page(i) for i in range(100, min(count, 400), 100)))
+        if count > 400:
+            errors.append(f'{name}: first 400 operations search results checked; coverage is partial')
+        candidates = {}
+        for p in pages:
+            for row in p.get('requisitionList') or []:
+                code = str(row.get('PrimaryLocationCountry') or '').lower()
+                identifier = str(row.get('Id') or '')
+                if code in COUNTRIES and identifier.isdigit() and role_candidate(str(row.get('Title') or '')) and valid_dates(row.get('PostedDate'), row.get('PostingEndDate')):
+                    candidates[identifier] = row
+        if len(candidates) > 30:
+            errors.append(f'{name}: first 30 relevant details checked; coverage is partial')
+
+        async def detail(identifier, listing):
+            try:
+                data = await request(host, 'recruitingCEJobRequisitionDetails', f'ById;Id={identifier},siteNumber=CX_1')
+                detail = next((r for r in data.get('items', []) if str(r.get('Id')) == identifier), None)
+                if not detail or not valid_dates(detail.get('ExternalPostedStartDate'), detail.get('ExternalPostedEndDate')):
+                    return None
+                code = str(detail.get('PrimaryLocationCountry') or '').lower()
+                if code not in COUNTRIES or code != str(listing.get('PrimaryLocationCountry') or '').lower():
+                    return None
+                description = '\n'.join(str(detail.get(field) or '') for field in
+                    ('ExternalDescriptionStr', 'ExternalResponsibilitiesStr', 'ExternalQualificationsStr'))
+                # Corporate boilerplate alone is not evidence of this job's scope.
+                if not description.strip():
+                    return None
+                url = f'https://{host}/hcmUI/CandidateExperience/en/sites/CX_1/job/{identifier}'
+                job = _clean_job({'id': identifier, 'title': detail.get('Title'), 'company': name,
+                    'location': str(detail.get('PrimaryLocation') or '') + ', ' + COUNTRIES[code],
+                    'description': html.unescape(description), 'url': url,
+                    'date': detail.get('ExternalPostedStartDate') or listing.get('PostedDate'),
+                    'employment_type': detail.get('JobSchedule') or ''}, 'Oracle Careers/'+name)
+                if job and fit(job, profile, settings)[0]:
+                    return mark(job, url, checked, _parse_iso(detail.get('ExternalPostedEndDate') or listing.get('PostingEndDate')))
+            except (httpx.HTTPError, ValueError, TypeError, KeyError):
+                errors.append(f'{name}: a shortlisted detail could not be verified')
+            return None
+        rows = await asyncio.gather(*(detail(identifier, row) for identifier, row in list(candidates.items())[:30]))
+        return [row for row in rows if row]
+    groups = await asyncio.gather(*(employer(*employer_site) for employer_site in ORACLE_EMPLOYERS))
+    return [row for group in groups for row in group], errors

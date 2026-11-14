@@ -174,4 +174,91 @@ def test_rss_rejects_xml_entities():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
             return await gulf.fetch_rss_employers(c, PROFILE, SETTINGS)
     rows, errors = asyncio.run(run())
-    assert rows == [] and len(errors) == 2
+    assert rows == [] and len(errors) == 3
+
+
+def test_oracle_public_postings_details_dates_country_and_pagination():
+    calls=[]
+    def handler(request):
+        calls.append(str(request.url))
+        params=request.url.params
+        if request.url.path.endswith('recruitingCEJobRequisitions'):
+            if request.url.host.startswith('ehpv'):
+                return httpx.Response(200,json={'items':[{'TotalJobsCount':0,'requisitionList':[]}]})
+            if 'offset=0' in params['finder']:
+                return httpx.Response(200,json={'items':[{'TotalJobsCount':102,'requisitionList':[
+                    {'Id':'1','Title':'Warehouse Manager','PrimaryLocationCountry':'AE','PostedDate':'2026-01-01'},
+                    {'Id':'2','Title':'Warehouse Manager','PrimaryLocationCountry':'AE','PostedDate':'2026-01-01'},
+                    {'Id':'3','Title':'Warehouse Manager','PrimaryLocationCountry':'AE','PostedDate':'2026-01-01'},
+                    {'Id':'4','Title':'Warehouse Manager','PrimaryLocationCountry':'AE','PostedDate':'2026-01-01'},
+                    {'Id':'5','Title':'Warehouse Coordinator','PrimaryLocationCountry':'AE'},
+                ]}]})
+            return httpx.Response(200,json={'items':[{'TotalJobsCount':102,'requisitionList':[]}]})
+        identifier=params['finder'].split('Id=')[1].split(',')[0]
+        if identifier=='2':return httpx.Response(404)
+        return httpx.Response(200,json={'items':[{'Id':identifier,'Title':'Warehouse Manager',
+            'PrimaryLocationCountry':'IN' if identifier=='3' else 'AE','PrimaryLocation':'Dubai',
+            'ExternalPostedStartDate':'2026-01-01',
+            'ExternalPostedEndDate':'2000-01-01' if identifier=='4' else '2099-01-01',
+            'ExternalResponsibilitiesStr':'<p>Warehouse operations and inventory SLA team leadership.</p>',
+            'ExternalQualificationsStr':'Minimum 5 years of experience',
+            'InternalResponsibilitiesStr':'PRIVATE INTERNAL FIELD MUST NEVER BE RETAINED'}]})
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await gulf.fetch_oracle_employers(c,PROFILE,SETTINGS)
+    rows,errors=asyncio.run(run())
+    assert len(rows)==1 and errors
+    row=rows[0]
+    assert row['source']=='Oracle Careers/Landmark Group'
+    assert row['country']=='United Arab Emirates' and row['posted_at'].startswith('2026-01-01')
+    assert 'PRIVATE INTERNAL' not in row['description']+row['raw_json']
+    assert gulf.current_evidence(row)
+    assert any('offset%3D100' in c for c in calls)
+    assert not any('Id%3D5' in c for c in calls)
+    assert all('recruitingICE' not in c for c in calls)
+
+
+def test_explicit_closing_time_overrides_feed_freshness():
+    now=datetime.now(timezone.utc)
+    row=gulf.mark(job(),'https://efhi.fa.em3.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/123',now.isoformat(),(now+timedelta(minutes=1)).isoformat())
+    assert gulf.current_evidence(row,now)
+    assert not gulf.current_evidence(row,now+timedelta(minutes=2))
+    assert gulf.evidence({'raw_json':'{"_gulf":"untrusted"}'})=={}
+
+
+def test_oracle_host_allowlist():
+    assert not gulf.safe_apply_url('https://attacker.oraclecloud.com/hcmUI/CandidateExperience/job/123')
+    assert gulf.safe_apply_url('https://ehpv.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/123')
+
+
+def test_provider_groups_run_together_and_keep_healthy_results(monkeypatch):
+    async def run():
+        oracle_started=asyncio.Event()
+        async def smart(*args):
+            await oracle_started.wait()
+            return [job()],[]
+        async def oracle(*args):
+            oracle_started.set()
+            raise ValueError('malformed optional feed')
+        async def rss(*args):return [],[]
+        monkeypatch.setattr(gulf,'fetch_smartrecruiters',smart)
+        monkeypatch.setattr(gulf,'fetch_oracle_employers',oracle)
+        monkeypatch.setattr(gulf,'fetch_rss_employers',rss)
+        monkeypatch.setattr(workflow,'get_profile_full',lambda:PROFILE)
+        def handler(request):return httpx.Response(200,json={'jobs':[]} if 'greenhouse' in request.url.host else [])
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await asyncio.wait_for(gulf.fetch_gulf_sources(c,SETTINGS),timeout=1)
+    rows,error=asyncio.run(run())
+    assert len(rows)==1 and 'Oracle careers' in error
+
+
+def test_alfuttaim_rss_country_only_location_is_not_guessed():
+    xml='''<rss><channel><item><title>Warehouse Manager (AE)</title><link>https://www.afuturewithus.com/job/123</link><description>Warehouse operations inventory SLA. Minimum 5 years of experience</description><pubDate>Fri, 13 Nov 2026 02:00:00 GMT</pubDate></item></channel></rss>'''
+    def handler(request):return httpx.Response(200,text=xml if request.url.host=='www.afuturewithus.com' else '<rss><channel/></rss>')
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await gulf.fetch_rss_employers(c,PROFILE,SETTINGS)
+    rows,error=asyncio.run(run())
+    assert len(rows)==1 and error==[]
+    assert rows[0]['location']=='United Arab Emirates'
+    assert rows[0]['country']=='United Arab Emirates'
