@@ -152,3 +152,39 @@ def test_bootstrap_preserves_partial_profile_fields(tmp_path, monkeypatch):
         db.execute("UPDATE candidate_profile SET headline='Operations leader' WHERE id=1")
     application_workflow.init_workflow_db()
     assert application_workflow.get_profile()['headline'] == 'Operations leader'
+
+
+@pytest.mark.parametrize('mode', ['success', 'failure', 'close'])
+def test_pooled_adapter_releases_once_and_rejects_use_after_release(mode):
+    class Lease:
+        def __init__(self):
+            self.exits = []
+
+        def __exit__(self, *args):
+            self.exits.append(args)
+            return False
+
+    class Connection:
+        rollbacks = 0
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    lease, raw = Lease(), Connection()
+    connection = database.PgConnection(raw, lease)
+    if mode == 'failure':
+        with pytest.raises(ValueError):
+            with connection:
+                raise ValueError('fixture transaction failure')
+        assert lease.exits[0][0] is ValueError
+    elif mode == 'success':
+        with connection:
+            pass
+        assert lease.exits[0][0] is None
+    else:
+        connection.close()
+        assert raw.rollbacks == 1
+    connection.close()
+    assert len(lease.exits) == 1
+    with pytest.raises(RuntimeError, match='returned to the pool'):
+        connection.execute('SELECT 1')

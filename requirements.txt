@@ -6,7 +6,7 @@ apscheduler>=3.10,<4.0
 pypdf>=5.0,<7.0
 python-multipart>=0.0.20,<1.0
 google-auth[requests]>=2.40,<3.0
-psycopg[binary]>=3.2,<4.0
+psycopg[binary,pool]>=3.2,<4.0
 # Pin to match Dockerfile Playwright browser image (v1.64.1)
 playwright==1.64.1
 pytest>=8.0,<9.0

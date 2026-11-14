@@ -151,3 +151,39 @@ def test_postgres_warm_reads_do_not_repeat_schema_or_default_writes(monkeypatch)
         # Only initialization is cached: a settings edit remains immediately visible.
         job_hunter.save_settings({'min_match_score': 57})
         assert job_hunter.get_settings()['min_match_score'] == 57
+
+
+def test_postgres_pool_reuses_connections_commits_and_rolls_back(monkeypatch):
+    import database
+    url = os.getenv('TEST_POSTGRES_URL')
+    if not url:
+        pytest.skip('TEST_POSTGRES_URL not configured')
+    monkeypatch.setenv('DATABASE_URL', url)
+    monkeypatch.setenv('ENABLE_SCHEDULER', 'false')
+    unique = uuid.uuid4().hex
+    with TestClient(main.app):
+        database.close_postgres_pools()
+        pool = database._postgres_pool()
+        pool.wait(timeout=15)
+        pids = set()
+        for _ in range(20):
+            with database.connect() as db:
+                assert db._raw.prepare_threshold is None
+                pids.add(db.execute('SELECT pg_backend_pid()').fetchone()[0])
+        assert len(pids) == 1
+        assert pool.get_stats()['connections_num'] == 1
+        with database.connect() as db:
+            db.execute('INSERT INTO settings(key,value) VALUES (?,?)',
+                       (unique, '"committed"'))
+        with pytest.raises(ValueError):
+            with database.connect() as db:
+                db.execute('UPDATE settings SET value=? WHERE key=?', ('"rolled back"', unique))
+                raise ValueError('fixture rollback')
+        abandoned = database.connect()
+        abandoned.execute('UPDATE settings SET value=? WHERE key=?', ('"abandoned"', unique))
+        abandoned.close()
+        with database.connect() as db:
+            assert db.execute('SELECT value FROM settings WHERE key=?', (unique,)).fetchone()[0] == '"committed"'
+        database.close_postgres_pools()
+        with database.connect() as db:
+            assert db.execute('SELECT 1').fetchone()[0] == 1
