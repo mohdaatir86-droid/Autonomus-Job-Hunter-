@@ -6,6 +6,7 @@ the app uses SQLite at DATABASE_PATH (default: ./job_hunter.db).
 from __future__ import annotations
 
 import os
+import atexit
 import hashlib
 from functools import wraps
 from threading import RLock
@@ -101,18 +102,35 @@ class PgCursor:
 
 
 class PgConnection:
-    def __init__(self, raw):
+    def __init__(self, raw, lease=None):
         self._raw = raw
+        self._lease = lease
+        self._released = False
 
     def __enter__(self):
-        self._raw.__enter__()
+        if self._released:
+            raise RuntimeError("Database connection already returned to the pool")
+        if self._lease is None:
+            self._raw.__enter__()
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        return self._raw.__exit__(exc_type, exc, tb)
+        if self._lease is None:
+            return self._raw.__exit__(exc_type, exc, tb)
+        if not self._released:
+            self._released = True
+            return self._lease.__exit__(exc_type, exc, tb)
+        return False
 
     def close(self):
-        self._raw.close()
+        if self._lease is None:
+            self._raw.close()
+        elif not self._released:
+            # Explicit close, unlike a successful with-block, must not commit.
+            try:
+                self._raw.rollback()
+            finally:
+                self.__exit__(None, None, None)
 
     @staticmethod
     def _sql(sql):
@@ -152,6 +170,8 @@ class PgConnection:
         return "".join(out)
 
     def execute(self, sql, params=()):
+        if self._released:
+            raise RuntimeError("Database connection already returned to the pool")
         import psycopg
         cursor = self._raw.cursor()
         cursor.execute(self._sql(sql), tuple(params or ()))
@@ -173,14 +193,44 @@ def _postgres_url():
     return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
+_postgres_pools = {}
+_postgres_pools_lock = RLock()
+
+
+def _postgres_pool():
+    from psycopg.rows import tuple_row
+    from psycopg_pool import ConnectionPool
+    url = _postgres_url()
+    identity = (os.getpid(), hashlib.sha256(url.encode()).digest())
+    with _postgres_pools_lock:
+        pool = _postgres_pools.get(identity)
+        if pool is None or pool.closed:
+            pool = ConnectionPool(
+                conninfo=url, min_size=1, max_size=8, open=True,
+                timeout=15, max_idle=60, max_lifetime=300, reconnect_timeout=15,
+                kwargs={"connect_timeout": 15, "row_factory": tuple_row, "prepare_threshold": None},
+                check=ConnectionPool.check_connection, name="job-hunter",
+            )
+            _postgres_pools[identity] = pool
+        return pool
+
+
+def close_postgres_pools():
+    with _postgres_pools_lock:
+        pools = list(_postgres_pools.values())
+        _postgres_pools.clear()
+    for pool in pools:
+        pool.close()
+
+
+atexit.register(close_postgres_pools)
+
+
 def connect(db_path=None):
     url = os.getenv("DATABASE_URL", "").strip()
     if url:
-        import psycopg
-        from psycopg.rows import tuple_row
-        return PgConnection(
-            psycopg.connect(_postgres_url(), connect_timeout=15, row_factory=tuple_row)
-        )
+        lease = _postgres_pool().connection()
+        return PgConnection(lease.__enter__(), lease=lease)
 
     path = str(db_path or os.getenv("DATABASE_PATH", "job_hunter.db"))
     if path != ":memory:":
