@@ -93,7 +93,7 @@ def test_smartrecruiters_pagination_details_closed_and_country_validation():
 
 
 def test_gulf_private_apis_and_original_listing_detail(client):
-    for path in ['/api/gulf/sources', '/api/jobs/123', '/api/jobs?gulf_open=true']:
+    for path in ['/api/gulf/sources', '/api/jobs/123', '/api/jobs?gulf_open=true', '/api/stats?gulf_open=true']:
         assert client.get(path).status_code == 401
     assert client.post('/api/gulf/refresh').status_code == 401
     response = client.get('/api/gulf/sources', headers=owner_headers())
@@ -116,6 +116,14 @@ def test_import_and_view_preserve_history_dates_duplicate_identity_and_other_sou
     result = client.get('/api/jobs?gulf_open=true', headers=owner_headers()).json()['items']
     assert len(result) == 1 and result[0]['posted_at'].startswith('2026-01-01')
     assert 'description' not in result[0] and 'raw_json' not in result[0]
+    assert client.get('/api/stats?gulf_open=true', headers=owner_headers()).json()['total_jobs'] == 1
+    assert client.get('/api/stats', headers=owner_headers()).json()['total_jobs'] == 0
+    for query, expected in [('country=India', 0), ('country=Qatar', 1), ('q=nonexistent', 0), ('q=Logistics', 1), ('source=missing', 0), ('status=saved', 0), ('min_score=100', 0)]:
+        scope = 'gulf_open=true&' + query
+        stats = client.get('/api/stats?' + scope, headers=owner_headers()).json()
+        listed = client.get('/api/jobs?' + scope, headers=owner_headers()).json()['items']
+        assert stats['total_jobs'] == len(listed) == expected
+        assert stats['freshness_scope'] == 'published_checked_36h'
     identifier = result[0]['id']
     details = client.get(f'/api/jobs/{identifier}', headers=owner_headers()).json()
     assert details['apply_url'].startswith('https://jobs.smartrecruiters.com/')
@@ -127,6 +135,8 @@ def test_import_and_view_preserve_history_dates_duplicate_identity_and_other_sou
         assert record['status'] == 'applied_manually'
         old = gulf.mark(dict(record), details['apply_url'], (datetime.now(timezone.utc) - timedelta(hours=40)).isoformat())
         db.execute('UPDATE jobs SET raw_json=? WHERE id=?', (old['raw_json'], identifier))
+    assert client.get('/api/stats?gulf_open=true', headers=owner_headers()).json()['total_jobs'] == 0
+    assert client.get('/api/stats?status=applied_manually', headers=owner_headers()).json()['total_jobs'] == 1
     assert client.get('/api/jobs?gulf_open=true', headers=owner_headers()).json()['items'] == []
     assert client.get('/api/jobs?status=applied_manually', headers=owner_headers()).json()['items']
     assert not client.get(f'/api/jobs/{identifier}', headers=owner_headers()).json()['published_recently_checked']

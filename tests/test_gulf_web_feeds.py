@@ -101,3 +101,26 @@ def test_embedded_employer_does_not_execute_js_or_follow_untrusted_redirects():
     async def fetch(c,p,s):return await web.fetch_phenom(c,p,s,'DHL','careers.dhl.com')
     jobs,errors=run(fetch,handler)
     assert not jobs and errors and len(calls)==1
+
+
+@pytest.mark.parametrize('date', ['not-a-date', '2099-01-01T00:00:00Z'])
+def test_amazon_invalid_or_future_publication_is_excluded(date):
+    row={'job_path':'/en/jobs/123/operations-manager','title':'Operations Manager','country_code':'ARE',
+         'description':'Warehouse operations inventory SLA team leadership','posted_date':date}
+    jobs,errors=run(web.fetch_amazon,lambda req:httpx.Response(200,json={'hits':1,'jobs':[row]}))
+    assert not jobs
+
+
+def test_amazon_malformed_row_is_reported_without_crashing():
+    jobs,errors=run(web.fetch_amazon,lambda req:httpx.Response(200,json={'hits':1,'jobs':[None]}))
+    assert not jobs and errors
+
+
+@pytest.mark.parametrize('date', ['not-a-date', '2099-01-01T00:00:00Z'])
+def test_alshaya_invalid_or_future_publication_is_excluded(date):
+    def handler(request):
+        if request.url.path.endswith('/job'):
+            return httpx.Response(200,text='<tbody id="search-results-content"><a href="/cau/en/job/123/store-operations-manager">Store Operations Manager</a></tbody>')
+        return httpx.Response(200,text=alshaya_detail().replace('2026-01-01T00:00:00Z',date))
+    jobs,errors=run(web.fetch_alshaya,handler)
+    assert not jobs

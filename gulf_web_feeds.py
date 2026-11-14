@@ -47,7 +47,7 @@ async def fetch_amazon(client, profile, settings):
                             break
                         except ValueError:
                             pass
-                if posted and posted > now:
+                if row.get('posted_date') and not posted or posted and posted > now:
                     continue
                 url = 'https://www.amazon.jobs' + path
                 job = _clean_job({'id':match[1],'title':row['title'],'company':'Amazon',
@@ -59,7 +59,7 @@ async def fetch_amazon(client, profile, settings):
                 break
         else:
             errors.append('Amazon: first 200 operations search results checked; coverage is partial')
-    except (httpx.HTTPError, ValueError, TypeError, KeyError):
+    except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
         errors.append('Amazon: public search unavailable or changed; coverage is partial')
     return jobs, errors
 
@@ -138,6 +138,7 @@ async def fetch_alshaya(client,profile,settings):
             country=detect_country(location,title,'')
             apply=any(' '.join(l['text']).strip().lower()=='apply now' for l in parsed.links)
             start=_parse_iso(parsed.dates.get('open-date'));end=_parse_iso(parsed.dates.get('close-date'))
+            if parsed.dates.get('open-date') and not start:return None
             if not apply or not description or country not in COUNTRIES.values() or (start and start>checked) or (end and end<=checked):return None
             if parsed.dates.get('close-date') and not end:return None
             job=_clean_job({'id':urlsplit(url).path.split('/')[4],'title':title,'company':'Alshaya',
@@ -202,6 +203,7 @@ async def fetch_phenom(client,profile,settings,name,host):
             description=job.get('description')
             if not description:return None
             posted=_parse_iso(job.get('postedDate'));end=_parse_iso(job.get('validThrough'))
+            if job.get('postedDate') and not posted or job.get('validThrough') and not end:return None
             if posted and posted>checked or end and end<=checked:return None
             record=_clean_job({'id':identifier,'title':job.get('title'),'company':name,
                 'location':_location(job.get('city') or job.get('location'),job['country']),

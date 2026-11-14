@@ -13,7 +13,7 @@ selection and is explicitly reported as partial coverage. Zero matching vacancie
 is valid and must not be filled with unrelated jobs.
 
 Seven job boards retain their existing Google Jobs / authorised email-alert
-coverage. Two other employer pages, including Noon, are external career links,
+coverage. Two other employer pages, Noon and Kitopi, are external career links,
 not direct integrations. Kitopi's employer-linked Lever board returned 404 during
 inspection; it is deliberately not presented as working. Site presence in the
 catalog never promises comprehensive coverage or that every job is open.
@@ -82,3 +82,21 @@ scans are explicitly partial and can return zero relevant jobs; search teasers
 and hidden closed-job templates alone never establish availability. No webpage
 JavaScript is executed. Noon and Kitopi remain external links until a reliable
 employer-authorised direct source is verified.
+
+## Dashboard scope and source follow-up (14 November 2026)
+
+The private statistics endpoint accepts the same country, search, source, score,
+status and Gulf scope as the vacancy list, before pagination. Gulf totals reuse
+its publication-evidence and current-profile checks. The disabled posting-window
+selector describes the 36-hour check window; switching back restores the saved
+posting window. Request sequencing and authentication epochs discard delayed
+market responses and prevent signed-out data from being restored. Original
+posting dates and available closing dates remain visible in the detail dialog.
+
+Noon's own company page links to https://joinnoon.com/ . The public operations
+search is https://joinnoon.com/jobs?department=Operations+%26+Logistics . It was
+verified as an employer career search with published roles, but no direct import
+is implemented. Its listings must not be counted as imported jobs. Kitopi's
+https://www.kitopi.com/careers remains the original career destination; a reliable
+current employer-authorised public feed could not be verified. Search-index
+snapshots or a similarly named ATS tenant do not establish current availability.

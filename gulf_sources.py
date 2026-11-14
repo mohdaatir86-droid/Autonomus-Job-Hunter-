@@ -17,7 +17,7 @@ CATALOG = [
     ('Talabat / Delivery Hero', 'https://careers.deliveryhero.com/talabat', 'direct', 'Published SmartRecruiters vacancies; six Gulf countries'),
     ('Careem', 'https://careers.careem.com/', 'direct', 'Public Greenhouse employer feed'),
     ('Lalamove', 'https://jobs.lever.co/lalamove', 'direct', 'Public Lever employer feed'),
-    ('Noon', 'https://www.linkedin.com/company/nooncom/jobs', 'external', 'Official company jobs on LinkedIn; access may require login'),
+    ('Noon', 'https://joinnoon.com/jobs?department=Operations+%26+Logistics', 'external', 'Official public career search; direct import not implemented, apply on employer site'),
     ('Snoonu', 'https://snoonu.keka.com/careers', 'direct', 'Official Keka public active-job feed; full descriptions and explicit locations'),
     ('Kitopi', 'https://www.kitopi.com/careers', 'external', 'Employer career page; linked Lever board returned 404, not an active feed'),
     ('DP World', 'https://ehpv.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'direct', 'Public employer Oracle career feed; operations search with published detail checks'),

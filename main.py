@@ -536,8 +536,17 @@ def google_sign_out():
 
 
 @app.get("/api/stats")
-def stats():
-    return get_stats()
+def stats(
+    country: str | None = None,
+    min_score: int = Query(default=0, ge=0, le=100),
+    status: str | None = None,
+    posted_within_days: int | None = Query(default=None, ge=1, le=365),
+    q: str | None = Query(default=None, max_length=120),
+    source: str | None = Query(default=None, max_length=80),
+    gulf_open: bool = False,
+):
+    return get_stats(country=country, min_score=min_score, status=status,
+                     posted_within_days=posted_within_days, q=q, source=source, gulf_open=gulf_open)
 
 
 @app.get("/api/operational-readiness")

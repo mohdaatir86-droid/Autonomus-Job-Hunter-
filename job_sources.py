@@ -922,7 +922,7 @@ def list_jobs(
             if eligible >= offset:
                 rows.append(row)
             eligible += 1
-            if len(rows) >= limit:
+            if limit is not None and len(rows) >= limit:
                 break
     for row in rows:
         try:
@@ -934,19 +934,15 @@ def list_jobs(
     return rows
 
 
-def get_stats():
+def get_stats(**filters):
     from collections import Counter
     settings = get_settings()
-    allowed = settings["target_countries"]
-    placeholders = ",".join("?" for _ in allowed)
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=settings.get("posted_within_days", 3))).isoformat()
     countries, sources = Counter(), Counter()
     total = new_count = high = 0
     with connect() as conn:
-        for record in conn.execute("SELECT * FROM jobs WHERE posted_at>=? AND country IN (" + placeholders + ")", (cutoff, *allowed)):
-            job = dict(record)
-            if not is_relevant_role(job) or not matches_preferences(job, settings):
-                continue
+        # Share the list's eligibility, evidence expiry and selected filters.
+        # No pagination: summary counts include every matching row.
+        for job in list_jobs(limit=None, **filters):
             total += 1
             new_count += job["status"] == "new"
             high += job["match_score"] >= 65
@@ -958,7 +954,8 @@ def get_stats():
         "last_run": dict(last) if last else None,
         "by_country": [{"country": name, "count": count} for name, count in countries.most_common()],
         "by_source": [{"source": name, "count": count} for name, count in sources.most_common()],
-        "posted_within_days": settings.get("posted_within_days", 3),
+        "posted_within_days": filters.get("posted_within_days") or settings.get("posted_within_days", 3),
+        "freshness_scope": "published_checked_36h" if filters.get("gulf_open") else "posting_window",
         "live_applications_enabled": False,
     }
 
