@@ -55,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             uploads=[]
             def delay_profile_save(route):
                 if route.request.method=='POST':
-                    pending_profile.append((route,route.fetch()))
+                    pending_profile.append(route)
                 else:route.continue_()
             page.route('**/api/profile',delay_profile_save)
             page.on('request',lambda request:uploads.append(request.url) if request.url==base+'/api/profile/resume' else None)
@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             assert len(pending_profile)==1
             assert uploads==[], 'PDF upload must wait for the pending profile save'
             with page.expect_request(base+'/api/profile/resume'):
-                pending_profile[0][0].fulfill(response=pending_profile[0][1])
+                pending_profile[0].continue_()
             expect(page.locator('#profileState')).to_have_text('PROFILE READY')
             page.unroute('**/api/profile',delay_profile_save)
             expect(page.locator('#missionResume')).to_have_text('Resume ready')
