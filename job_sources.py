@@ -309,6 +309,7 @@ def ensure_job_columns():
             if "normalized_url" not in columns:
                 conn.execute("ALTER TABLE jobs ADD COLUMN normalized_url TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_normalized_url ON jobs(normalized_url)")
+        conn.execute("CREATE TABLE IF NOT EXISTS discovery_leases(name TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at TEXT NOT NULL)")
 
 
 def persist_source_report(reports, portal_counts=None):
@@ -587,6 +588,14 @@ async def fetch_public_sources(settings):
             add_report("Lever company boards", [], _safe_source_error(e))
 
         try:
+            from gulf_sources import fetch_gulf_sources, FEED_NAME
+            gulf_jobs, gulf_error = await fetch_gulf_sources(client, settings)
+            results.extend(gulf_jobs)
+            add_report(FEED_NAME, gulf_jobs, gulf_error)
+        except Exception as e:
+            add_report("Gulf employer feeds", [], _safe_source_error(e))
+
+        try:
             from gmail_alerts import fetch_jobs_from_gmail
 
             gmail_jobs, gmail_err = await fetch_jobs_from_gmail()
@@ -654,7 +663,7 @@ def matches_preferences(job, settings):
     return True
 
 
-async def hunt_jobs():
+async def hunt_jobs(gulf_only=False):
     if _hunt_lock.locked():
         return {
             "status": "already_running",
@@ -667,21 +676,45 @@ async def hunt_jobs():
         }
     await _hunt_lock.acquire()
     try:
-        return await _hunt_jobs_locked()
+        import secrets
+        ensure_job_columns()
+        owner = secrets.token_hex(16)
+        expiry = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+        with connect() as conn:
+            conn.execute("INSERT INTO discovery_leases(name,owner,expires_at) VALUES ('hunt',?,?) ON CONFLICT(name) DO NOTHING", (owner, expiry))
+            claim = conn.execute("UPDATE discovery_leases SET owner=?,expires_at=? WHERE name='hunt' AND (owner=? OR expires_at<?)", (owner, expiry, owner, now_iso()))
+            acquired = claim.rowcount == 1
+        if not acquired:
+            return {"status": "already_running", "fetched": 0, "new_jobs": 0, "errors": []}
+        try:
+            return await _hunt_jobs_locked(gulf_only=gulf_only)
+        finally:
+            with connect() as conn:
+                conn.execute("DELETE FROM discovery_leases WHERE name='hunt' AND owner=?", (owner,))
     finally:
         _hunt_lock.release()
 
 
-async def _hunt_jobs_locked():
+async def _hunt_jobs_locked(gulf_only=False):
     started = now_iso()
     settings = get_settings()
     ensure_job_columns()
-    fetched, errors, reports, portal_counts = await fetch_public_sources(settings)
+    if gulf_only:
+        from gulf_sources import fetch_gulf_sources, FEED_NAME
+        async with httpx.AsyncClient(headers={"User-Agent": "AutonomousJobHunter/0.6"}) as client:
+            fetched, detail = await fetch_gulf_sources(client, settings)
+        errors = [detail] if detail else []
+        reports = [{"name": FEED_NAME, "status": "degraded" if detail else "working", "fetched": len(fetched), "detail": detail or "", "configured": True}]
+        portal_counts = None
+    else:
+        fetched, errors, reports, portal_counts = await fetch_public_sources(settings)
     inserted = updated = closed = 0
     sources_touched = set()
     notify_jobs = []
     notification_now = datetime.now(timezone.utc)
     notification_cutoff = (notification_now - timedelta(days=settings.get("posted_within_days", 3))).isoformat()
+    from application_workflow import get_profile_full
+    gulf_profile = get_profile_full()
     full_board_urls = {}
     for job in fetched:
         if job.get("_board_complete"):
@@ -689,7 +722,12 @@ async def _hunt_jobs_locked():
     with connect() as conn:
         for job in fetched:
             score, reasons, country = score_job(job, settings)
-            if not is_relevant_role(job) or country not in settings.get("target_countries", DEFAULT_COUNTRIES) or not is_target_market_job(job, country) or not matches_preferences({**job, "country": country}, settings):
+            from gulf_sources import current_evidence, fit
+            gulf_verified = current_evidence(job)
+            if gulf_verified:
+                if not fit(job, gulf_profile, settings)[0]:
+                    continue
+            elif not is_relevant_role(job) or country not in settings.get("target_countries", DEFAULT_COUNTRIES) or not is_target_market_job(job, country) or not matches_preferences({**job, "country": country}, settings):
                 continue
             sources_touched.add(job.get("source") or "?")
             normalized_url = normalize_job_url(job["url"])
@@ -764,13 +802,18 @@ async def _hunt_jobs_locked():
             (started, now_iso(), len(reports), len(fetched), inserted, json.dumps(errors)),
         )
     try:
+        if gulf_only:
+            previous = get_source_report() or {}
+            reports = [r for r in previous.get("sources", []) if r.get("name") != "Gulf employer feeds"] + reports
+            portal_counts = previous.get("portal_counts", {})
         persist_source_report(reports, portal_counts)
     except Exception:
         log.exception("Could not persist source report")
     notify_result = {"sent": False, "skipped": True}
     try:
         from notify import notify_high_match_jobs
-        notify_result = await notify_high_match_jobs(notify_jobs)
+        if not gulf_only:
+            notify_result = await notify_high_match_jobs(notify_jobs)
     except Exception as e:
         summary = _safe_source_error(e)
         log.warning("Job notification failed: %s", summary)
@@ -802,11 +845,14 @@ def list_jobs(
     q=None,
     source=None,
     draft_candidates=False,
+    gulf_open=False,
 ):
     init_db()
     settings = get_settings()
     tracked = status in {"saved", "shortlisted", "draft_ready", "applied_manually", "interview", "offer", "rejected", "not_relevant", "closed"}
-    if country:
+    if gulf_open:
+        allowed = [country] if country else GULF_COUNTRIES
+    elif country:
         allowed = [country]
     else:
         allowed = LISTABLE_COUNTRIES if tracked else settings["target_countries"]
@@ -824,6 +870,10 @@ def list_jobs(
         params.append("%" + source.strip().lower() + "%")
     if posted_within_days is None:
         posted_within_days = 0 if status in {"saved", "shortlisted", "draft_ready", "applied_manually", "interview", "offer", "rejected", "not_relevant", "closed"} else settings.get("posted_within_days", 3)
+    if gulf_open:
+        posted_within_days = 0
+        if not status:
+            clauses.append("status NOT IN ('closed','not_relevant','rejected')")
     if posted_within_days:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=int(posted_within_days))).isoformat()
         clauses.append("posted_at IS NOT NULL AND posted_at >= ?")
@@ -850,10 +900,20 @@ def list_jobs(
         + " ORDER BY match_score DESC, COALESCE(posted_at, first_seen_at) DESC"
     )
     rows, eligible = [], 0
+    if gulf_open:
+        from gulf_sources import current_evidence, fit, evidence
+        from application_workflow import get_profile_full
+        profile = get_profile_full()
     with connect() as conn:
         for record in conn.execute(sql, params):
             row = dict(record)
-            if not tracked and (not is_relevant_role(row) or not matches_preferences(row, settings)):
+            if gulf_open:
+                suitable, notes = fit(row, profile, settings)
+                if not current_evidence(row) or not suitable:
+                    continue
+                row["gulf_evidence"] = evidence(row)
+                row["fit_notes"] = notes
+            elif not tracked and (not is_relevant_role(row) or not matches_preferences(row, settings)):
                 continue
             if eligible >= offset:
                 rows.append(row)

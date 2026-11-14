@@ -38,3 +38,10 @@ async def prospeo(path,params):
     person['email']={'email':'recruiter@example.com','status':'VERIFIED','revealed':True}
     return {'person':person,'company':company}
 prospeo_provider.request=prospeo
+
+# Dedicated free Gulf refresh is mocked independently of the normal hunt.
+import gulf_sources
+async def gulf_fixture(client,settings):
+    row=job_sources._clean_job({'id':'gulf-fixture','title':'Sr. Manager Logistics Operations','company':'Gulf Fixture Employer','location':'Doha, Qatar','url':'https://jobs.smartrecruiters.com/DeliveryHero/123','description':'Warehouse operations and multi-site logistics leadership. Inventory SLA KPI. Review qualification and work-authorisation requirements.','date':'2026-01-01'},'SmartRecruiters/DeliveryHero')
+    return [gulf_sources.mark(row,'https://jobs.smartrecruiters.com/oneclick-ui/fixture',job_hunter.now_iso())],None
+gulf_sources.fetch_gulf_sources=gulf_fixture
