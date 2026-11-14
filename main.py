@@ -314,6 +314,8 @@ async def protect_private_candidate_data(request, call_next):
         or path == "/api/gmail/status"
         or path == "/api/setup"
         or path in {"/api/jobs", "/api/stats", "/api/settings", "/api/sources", "/api/operational-readiness", "/health/db"}
+        or path.startswith("/api/jobs/")
+        or path.startswith("/api/gulf")
         or path.startswith("/api/outreach")
         or path == "/health/browser"
         or path == "/api/profile"
@@ -576,6 +578,7 @@ def jobs(
     posted_within_days: int | None = Query(default=None, ge=1, le=365),
     q: str | None = Query(default=None, max_length=120),
     source: str | None = Query(default=None, max_length=80),
+    gulf_open: bool = False,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -590,8 +593,45 @@ def jobs(
             offset=offset,
             q=q,
             source=source,
+            gulf_open=gulf_open,
         )
     }
+
+
+@app.get("/api/gulf/sources")
+def gulf_source_catalog():
+    from gulf_sources import catalog, COUNTRIES
+    from job_sources import get_source_report
+    report = get_source_report() or {}
+    feed = next((r for r in report.get("sources", []) if r.get("name") == "Gulf employer feeds"), {})
+    return {"items": catalog(), "countries": list(COUNTRIES.values()), "feed": feed,
+            "checked_at": report.get("checked_at"), "note": "Direct feeds refresh on the existing discovery schedule. External links and indexed boards are not direct integrations. No source list is exhaustive."}
+
+
+@app.post("/api/gulf/refresh")
+async def refresh_gulf_jobs():
+    # Public employer feeds only: no paid search, mailbox read, outreach tick or notification.
+    return await hunt_jobs(gulf_only=True)
+
+
+@app.get("/api/jobs/{job_id}")
+def job_detail(job_id: int):
+    from job_hunter import connect
+    from gulf_sources import evidence, current_evidence, fit
+    with connect() as conn:
+        record = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if not record:
+        raise HTTPException(404, "Job not found")
+    row = dict(record)
+    meta = evidence(row)
+    recently_checked = bool(current_evidence(row))
+    suitable, notes = fit(row, get_profile_full(), get_settings())
+    row.pop("raw_json", None)
+    row["gulf_evidence"] = meta
+    row["fit_notes"] = notes if suitable else ["Review role requirements against your profile before applying."]
+    row["published_recently_checked"] = recently_checked and row["status"] != "closed"
+    row["apply_url"] = meta.get("apply_url") if row["published_recently_checked"] else None
+    return row
 
 
 @app.post("/api/hunt")
@@ -937,6 +977,8 @@ def sources():
     by_name = {item.get("name"): item for item in (report.get("sources") or [])}
     greenhouse_env = bool(os.getenv("GREENHOUSE_BOARDS", "").strip())
     catalog = [
+        {"name": "Gulf employer feeds", "type": "Public employer ATS", "configured": True,
+         "connection_mode": "Delivery Hero / Talabat, Careem, Lalamove, GMG and Aramex; six Gulf countries; no key"},
         {"name": "Arbeitnow", "type": "Public job API", "configured": True, "connection_mode": "Public API, no key"},
         {"name": "Remotive", "type": "Public job API", "configured": True, "connection_mode": "Public API, operations category"},
         {"name": "Jobicy", "type": "Public job API", "configured": True, "connection_mode": "Public API, no key"},
