@@ -536,8 +536,17 @@ def google_sign_out():
 
 
 @app.get("/api/stats")
-def stats():
-    return get_stats()
+def stats(
+    country: str | None = None,
+    min_score: int = Query(default=0, ge=0, le=100),
+    status: str | None = None,
+    posted_within_days: int | None = Query(default=None, ge=1, le=365),
+    q: str | None = Query(default=None, max_length=120),
+    source: str | None = Query(default=None, max_length=80),
+    gulf_open: bool = False,
+):
+    return get_stats(country=country, min_score=min_score, status=status,
+                     posted_within_days=posted_within_days, q=q, source=source, gulf_open=gulf_open)
 
 
 @app.get("/api/operational-readiness")
@@ -978,7 +987,7 @@ def sources():
     greenhouse_env = bool(os.getenv("GREENHOUSE_BOARDS", "").strip())
     catalog = [
         {"name": "Gulf employer feeds", "type": "Public employer ATS", "configured": True,
-         "connection_mode": "Delivery Hero / Talabat, Careem, Lalamove, GMG, Aramex, Al-Futtaim, DP World and Landmark; six Gulf countries; no key"},
+         "connection_mode": "Delivery Hero / Talabat, Careem, Lalamove, GMG, Aramex, Al-Futtaim, DP World, Landmark, Snoonu, Amazon, Alshaya, DHL and Majid Al Futtaim; six Gulf countries; no key"},
         {"name": "Arbeitnow", "type": "Public job API", "configured": True, "connection_mode": "Public API, no key"},
         {"name": "Remotive", "type": "Public job API", "configured": True, "connection_mode": "Public API, operations category"},
         {"name": "Jobicy", "type": "Public job API", "configured": True, "connection_mode": "Public API, no key"},

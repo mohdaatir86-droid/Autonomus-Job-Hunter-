@@ -93,7 +93,7 @@ def test_smartrecruiters_pagination_details_closed_and_country_validation():
 
 
 def test_gulf_private_apis_and_original_listing_detail(client):
-    for path in ['/api/gulf/sources', '/api/jobs/123', '/api/jobs?gulf_open=true']:
+    for path in ['/api/gulf/sources', '/api/jobs/123', '/api/jobs?gulf_open=true', '/api/stats?gulf_open=true']:
         assert client.get(path).status_code == 401
     assert client.post('/api/gulf/refresh').status_code == 401
     response = client.get('/api/gulf/sources', headers=owner_headers())
@@ -116,6 +116,14 @@ def test_import_and_view_preserve_history_dates_duplicate_identity_and_other_sou
     result = client.get('/api/jobs?gulf_open=true', headers=owner_headers()).json()['items']
     assert len(result) == 1 and result[0]['posted_at'].startswith('2026-01-01')
     assert 'description' not in result[0] and 'raw_json' not in result[0]
+    assert client.get('/api/stats?gulf_open=true', headers=owner_headers()).json()['total_jobs'] == 1
+    assert client.get('/api/stats', headers=owner_headers()).json()['total_jobs'] == 0
+    for query, expected in [('country=India', 0), ('country=Qatar', 1), ('q=nonexistent', 0), ('q=Logistics', 1), ('source=missing', 0), ('status=saved', 0), ('min_score=100', 0)]:
+        scope = 'gulf_open=true&' + query
+        stats = client.get('/api/stats?' + scope, headers=owner_headers()).json()
+        listed = client.get('/api/jobs?' + scope, headers=owner_headers()).json()['items']
+        assert stats['total_jobs'] == len(listed) == expected
+        assert stats['freshness_scope'] == 'published_checked_36h'
     identifier = result[0]['id']
     details = client.get(f'/api/jobs/{identifier}', headers=owner_headers()).json()
     assert details['apply_url'].startswith('https://jobs.smartrecruiters.com/')
@@ -127,6 +135,8 @@ def test_import_and_view_preserve_history_dates_duplicate_identity_and_other_sou
         assert record['status'] == 'applied_manually'
         old = gulf.mark(dict(record), details['apply_url'], (datetime.now(timezone.utc) - timedelta(hours=40)).isoformat())
         db.execute('UPDATE jobs SET raw_json=? WHERE id=?', (old['raw_json'], identifier))
+    assert client.get('/api/stats?gulf_open=true', headers=owner_headers()).json()['total_jobs'] == 0
+    assert client.get('/api/stats?status=applied_manually', headers=owner_headers()).json()['total_jobs'] == 1
     assert client.get('/api/jobs?gulf_open=true', headers=owner_headers()).json()['items'] == []
     assert client.get('/api/jobs?status=applied_manually', headers=owner_headers()).json()['items']
     assert not client.get(f'/api/jobs/{identifier}', headers=owner_headers()).json()['published_recently_checked']
@@ -262,3 +272,44 @@ def test_alfuttaim_rss_country_only_location_is_not_guessed():
     assert len(rows)==1 and error==[]
     assert rows[0]['location']=='United Arab Emirates'
     assert rows[0]['country']=='United Arab Emirates'
+
+
+def test_snoonu_only_active_gulf_ops_with_explicit_experience_and_real_dates():
+    jobs=[{'id':1,'title':'Vertical Operations Director','description':'Warehouse operations and multi-site fulfilment inventory SOP. Minimum 5 years of experience.',
+           'jobLocations':[{'city':'Lusail','countryCode':'QA'}],'publishedOn':'2026-01-01T00:00:00Z','jobType':2},
+          {'id':2,'title':'Tech Lead – Logistics Systems','description':'Warehouse logistics software engineering','jobLocations':[{'city':'Lusail','countryCode':'QA'}]},
+          {'id':3,'title':'Operations Manager','description':'Warehouse operations logistics leadership','jobLocations':[{'city':'Lahore','countryCode':'PK'}]},
+          {'id':4,'title':'Operations Manager','description':'Warehouse operations logistics. '+('x '*10000),'experience':'5-7', 'jobLocations':[{'city':'Lusail','countryCode':'QA'}]},
+          {'id':5,'title':'Operations Manager','description':'Warehouse operations','jobLocations':[{'city':'Lusail','countryCode':'QA'}],'publishedOn':'2099-01-01'},
+          {'id':'../../private','title':'Operations Manager','description':'Warehouse operations','jobLocations':[{'countryCode':'QA'}]}]
+    calls=[]
+    def handler(request):calls.append(str(request.url));return httpx.Response(200,json=jobs)
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await gulf.fetch_snoonu(c,PROFILE,SETTINGS)
+    rows,errors=asyncio.run(run())
+    assert len(rows)==1 and not errors
+    assert rows[0]['country']=='Qatar' and rows[0]['posted_at'].startswith('2026-01-01')
+    assert gulf.current_evidence(rows[0])
+    assert gulf.evidence(rows[0])['apply_url']=='https://snoonu.keka.com/careers/jobdetails/1'
+    assert len(calls)==1 and '/active/' in calls[0]
+
+
+def test_known_retail_leadership_is_ranked_with_physical_context_only():
+    settings={'target_countries':['Qatar']}
+    physical='Multi-site warehouse operations, fulfilment, inventory, workforce, SLA and KPI. Store operations cost control.'
+    regional=job('Regional Concept Business Head - Home Centre',physical)
+    store=job('Store Manager',physical)
+    tech=job('Tech Lead – Logistics Systems',physical+' software engineering')
+    assert job_hunter.score_job(regional,settings)[0]>job_hunter.score_job(store,settings)[0]>24
+    assert job_hunter.score_job(tech,settings)[0]<=12
+    assert not job_hunter.is_relevant_role(tech)
+    assert job_hunter.score_job(job('Regional Concept Business Head - Home Centre','Business strategy only'),settings)[0]<=24
+
+
+def test_snoonu_bad_response_cannot_claim_working_or_infer_countries():
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req:httpx.Response(200,json={'error':'changed'}))) as c:
+            return await gulf.fetch_snoonu(c,PROFILE,SETTINGS)
+    rows,errors=asyncio.run(run())
+    assert rows==[] and errors

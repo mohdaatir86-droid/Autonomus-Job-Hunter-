@@ -225,7 +225,7 @@ def role_context(job):
     physical_terms = ["warehouse", "warehousing", "fulfil", "fulfill", "supply chain", "logistics",
                       "last mile", "last-mile", "dark store", "distribution", "city operations",
                       "store operations", "fleet", "quick commerce", "q-commerce", "qsr",
-                      "restaurant operations", "multi-unit operations", "multi unit operations"]
+                      "restaurant operations", "kitchen operations", "multi-unit operations", "multi unit operations"]
     groups = [
         ["warehouse", "warehousing", "fulfil", "fulfill", "dark store", "distribution centre", "distribution center"],
         ["last mile", "last-mile", "logistics", "supply chain", "fleet"],
@@ -234,12 +234,12 @@ def role_context(job):
     ]
     physical = any(term in title for term in physical_terms) or sum(
         any(term in description for term in group) for group in groups
-    ) >= 2 or bool(re.search(r"\b(?:warehouse|fulfilment|fulfillment|dark store|supply chain|last[ -]mile|qsr|restaurant|store) operations\b", description))
+    ) >= 2 or bool(re.search(r"\b(?:warehouse|fulfilment|fulfillment|dark store|supply chain|last[ -]mile|qsr|restaurant|kitchen|store) operations\b", description))
     # A software/HR/sales job at a logistics employer is still a different role.
     unrelated = any(term in title for term in ["software", "engineer", "engineering", "security", "developer",
         "data science", "machine learning", "finance", "accounting", "sales", "marketing",
         "talent acquisition", "human resources", "product manager", "it support", "technical program",
-        "technical programme", "solutions architect"]) or bool(re.search(r"\b(?:it|hr)\b", title))
+        "technical programme", "solutions architect", "tech lead", "technical lead", "technology manager", "systems manager"]) or bool(re.search(r"\b(?:it|hr)\b", title))
     generic_program = any(term in title for term in ["program manager", "programme manager"]) and not physical
     return unrelated, generic_program, physical
 
@@ -254,6 +254,7 @@ def score_job(job, settings):
     description = normalize_text(job.get("description")).lower()
     text = " ".join([title, description])
     score, reasons = 0, []
+    title_is_non_ops, generic_program_manager, physical_context = role_context(job)
     role_groups = [
         (["senior cluster manager", "cluster manager", "city operations manager", "city manager", "area operations manager", "area manager"], 42, "Cluster/city/area operations leadership"),
         (["head of operations", "director of operations", "regional operations manager", "regional operations"], 40, "Regional or head-of-operations leadership"),
@@ -264,6 +265,10 @@ def score_job(job, settings):
         (["supply chain manager", "logistics manager", "last mile manager", "last-mile manager", "dark store manager", "store operations manager"], 34, "Supply-chain/logistics leadership"),
         (["operations lead", "logistics lead", "warehouse lead", "fulfilment lead", "fulfillment lead"], 27, "Operations team leadership"),
     ]
+    if physical_context:
+        role_groups[1][0].extend(["regional concept business head", "vertical operations director", "operations director"])
+        role_groups[3][0].extend(["manager logistics operations", "operations scaling manager", "kitchen manager"])
+        role_groups.append((["store manager", "store leadership"], 27, "Store operations leadership"))
     role_score = 5
     for terms, points, reason in role_groups:
         if any(term in title for term in terms):
@@ -276,7 +281,6 @@ def score_job(job, settings):
     ):
         role_score = 20
         reasons.append("Adjacent operations role")
-    title_is_non_ops, generic_program_manager, physical_context = role_context(job)
     if title_is_non_ops:
         role_score = min(role_score, 8)
         reasons = ["Title appears outside the target operations domain"]

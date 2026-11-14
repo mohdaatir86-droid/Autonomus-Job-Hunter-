@@ -17,18 +17,18 @@ CATALOG = [
     ('Talabat / Delivery Hero', 'https://careers.deliveryhero.com/talabat', 'direct', 'Published SmartRecruiters vacancies; six Gulf countries'),
     ('Careem', 'https://careers.careem.com/', 'direct', 'Public Greenhouse employer feed'),
     ('Lalamove', 'https://jobs.lever.co/lalamove', 'direct', 'Public Lever employer feed'),
-    ('Noon', 'https://www.linkedin.com/company/nooncom/jobs', 'external', 'Official company jobs on LinkedIn; access may require login'),
-    ('Snoonu', 'https://snoonu.keka.com/careers', 'external', 'Official employer career board'),
+    ('Noon', 'https://joinnoon.com/jobs?department=Operations+%26+Logistics', 'external', 'Official public career search; direct import not implemented, apply on employer site'),
+    ('Snoonu', 'https://snoonu.keka.com/careers', 'direct', 'Official Keka public active-job feed; full descriptions and explicit locations'),
     ('Kitopi', 'https://www.kitopi.com/careers', 'external', 'Employer career page; linked Lever board returned 404, not an active feed'),
     ('DP World', 'https://ehpv.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'direct', 'Public employer Oracle career feed; operations search with published detail checks'),
     ('Landmark Group', 'https://efhi.fa.em3.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'direct', 'Public employer Oracle career feed; operations search with published detail checks'),
     ('Aramex', 'https://careers.aramex.com/search/?q=operations', 'direct', 'Employer RSS; bounded published selection, not every vacancy'),
-    ('DHL', 'https://careers.dhl.com/global/en/search-results', 'external', 'Official employer career search'),
-    ('Alshaya', 'https://www.alshaya.com/english/careers/vacancies/', 'external', 'Official employer vacancies'),
+    ('DHL', 'https://careers.dhl.com/global/en/search-results', 'direct', 'Public embedded search data; bounded global scan with Gulf filters, partial coverage'),
+    ('Alshaya', 'https://jobsearch.alshaya.com/cau/en/job', 'direct', 'Official published vacancies and Apply now details; bounded pages'),
     ('Al-Futtaim', 'https://www.afuturewithus.com/search/?q=operations', 'direct', 'Official employer RSS; bounded operations search selection'),
-    ('Majid Al Futtaim', 'https://careers.majidalfuttaim.com/global/en/search-results', 'external', 'Official employer career search'),
+    ('Majid Al Futtaim', 'https://careers.majidalfuttaim.com/global/en/search-results', 'direct', 'Public embedded search and active details; bounded global scan, partial coverage'),
     ('GMG', 'https://careers.gmg.com/jobs', 'direct', 'Employer RSS with published job descriptions and explicit job locations'),
-    ('Amazon Operations', 'https://www.amazon.jobs/content/en/teams/fulfillment-and-operations/fulfillment-center-management', 'external', 'Official operations career hub; select Gulf location'),
+    ('Amazon Operations', 'https://www.amazon.jobs/content/en/teams/fulfillment-and-operations/fulfillment-center-management', 'direct', 'Public Amazon Jobs operations search restricted to six Gulf country codes'),
     ('NaukriGulf', 'https://www.naukrigulf.com/operations-manager-jobs', 'indexed', 'Google Jobs / connected job alerts; partial indexed coverage'),
     ('GulfTalent', 'https://www.gulftalent.com/jobs/title/operations-manager', 'indexed', 'Google Jobs / connected job alerts; partial indexed coverage'),
     ('Bayt', 'https://www.bayt.com/en/international/jobs/operations-manager-jobs/', 'indexed', 'Google Jobs / connected job alerts; partial indexed coverage'),
@@ -54,9 +54,9 @@ def role_candidate(title):
     text = title.lower()
     if re.search(r'\b(junior|intern|trainee|picker|packer|driver|chef|coordinator|associate|specialist|supervisor|assistant)\b', text) and not re.search(r'\b(?:associate|assistant) director\b', text):
         return False
-    if re.search(r'\b(sales|account|category|procurement|purchasing|marketing|engineering|engineer|software|product|data|finance|real estate|communications|customer care|customer experience|retail media|acquisition)\b', text):
+    if re.search(r'\b(tech|technical|technology|systems|architect|architecture|devops|sales|account|category|procurement|purchasing|marketing|engineering|engineer|software|product|data|finance|real estate|communications|customer care|customer experience|retail media|acquisition)\b', text):
         return False
-    return bool(re.search(r'\b(manager|head|director|lead|leadership)\b', text) and re.search(r'\b(operations|logistics|warehouse|warehousing|fulfilment|fulfillment|supply chain|distribution|inventory|store|stores|rider|workforce|3pl|city|area|cluster|regional|country|program|programme|restaurant|qsr)\b', text))
+    return bool(re.search(r'\b(manager|head|director|lead|leadership)\b', text) and re.search(r'\b(operations|logistics|warehouse|warehousing|fulfilment|fulfillment|supply chain|distribution|inventory|store|stores|rider|workforce|3pl|city|area|cluster|regional|country|program|programme|restaurant|kitchen|qsr)\b', text))
 
 
 def fit(job, profile, settings):
@@ -114,7 +114,8 @@ def safe_apply_url(url):
         return p.scheme == 'https' and not p.username and not p.password and (p.port in (None, 443)) and p.hostname in {
             'jobs.smartrecruiters.com', 'careers.smartrecruiters.com', 'job-boards.greenhouse.io',
             'boards.greenhouse.io', 'boards.eu.greenhouse.io', 'jobs.lever.co', 'careers.careem.com',
-            'careers.gmg.com', 'careers.aramex.com', 'www.afuturewithus.com',
+            'careers.gmg.com', 'careers.aramex.com', 'www.afuturewithus.com', 'snoonu.keka.com', 'www.amazon.jobs', 'amazon.jobs', 'jobsearch.alshaya.com',
+            'careers.dhl.com', 'careers.majidalfuttaim.com',
             'ehpv.fa.em2.oraclecloud.com', 'efhi.fa.em3.oraclecloud.com'}
     except (ValueError, TypeError):
         return False
@@ -212,19 +213,25 @@ async def fetch_gulf_sources(client, settings):
             errors.append(f'{name}: public feed unavailable; no new verified roles imported')
         return found
     import httpx
+    from gulf_web_feeds import fetch_amazon, fetch_alshaya, fetch_phenom
     async def bounded(name, operation):
         try:
             return await asyncio.wait_for(operation, timeout=60)
-        except (TimeoutError, httpx.HTTPError, ValueError, TypeError, KeyError):
+        except (TimeoutError, httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError, IndexError):
             return [], [f'{name}: provider time budget or response validation failed; coverage is partial']
 
-    smart, oracle, rss, careem, lalamove = await asyncio.gather(
+    smart, oracle, rss, snoonu, amazon, alshaya, dhl, maf, careem, lalamove = await asyncio.gather(
         bounded('SmartRecruiters', fetch_smartrecruiters(client, profile, settings)),
         bounded('Oracle careers', fetch_oracle_employers(client, profile, settings)),
         bounded('Employer RSS', fetch_rss_employers(client, profile, settings)),
+        bounded('Snoonu', fetch_snoonu(client, profile, settings)),
+        bounded('Amazon', fetch_amazon(client, profile, settings)),
+        bounded('Alshaya', fetch_alshaya(client, profile, settings)),
+        bounded('DHL', fetch_phenom(client, profile, settings, 'DHL', 'careers.dhl.com')),
+        bounded('Majid Al Futtaim', fetch_phenom(client, profile, settings, 'Majid Al Futtaim', 'careers.majidalfuttaim.com')),
         employer('Careem', 'https://boards-api.greenhouse.io/v1/boards/careem/jobs?content=true'),
         employer('Lalamove', 'https://api.lever.co/v0/postings/lalamove'))
-    for rows, issues in (smart, oracle, rss):
+    for rows, issues in (smart, oracle, rss, snoonu, amazon, alshaya, dhl, maf):
         jobs.extend(rows)
         errors.extend(issues)
     jobs.extend(careem)
@@ -378,3 +385,59 @@ async def fetch_oracle_employers(client, profile, settings):
         return [row for row in rows if row]
     groups = await asyncio.gather(*(employer(*employer_site) for employer_site in ORACLE_EMPLOYERS))
     return [row for group in groups for row in group], errors
+
+
+async def fetch_snoonu(client, profile, settings):
+    """Read the active public feed used by Snoonu's official Keka embed widget.
+
+    Endpoint and tenant come from the employer-published embed script. They are
+    fixed here; no tokens, candidates, internal jobs or recruiter APIs are read.
+    """
+    import httpx
+    from job_sources import _clean_job, _parse_iso
+    errors, jobs = [], []
+    checked = datetime.now(timezone.utc).isoformat()
+    try:
+        response = await client.get('https://snoonu.keka.com/careers/api/embedjobs/default/active/80eaceed-f9ad-465b-a21c-b5515f6624c8',
+                                    timeout=15, follow_redirects=False)
+        response.raise_for_status()
+        if len(response.content) > 3_000_000:
+            raise ValueError('Oversized public feed')
+        rows = response.json()
+        if not isinstance(rows, list):
+            raise ValueError('Active feed format changed')
+        if len(rows) > 500:
+            errors.append('Snoonu: first 500 published jobs checked; coverage is partial')
+        for row in rows[:500]:
+            if not isinstance(row, dict):
+                raise ValueError('Invalid public job')
+            identifier = str(row.get('id') or '')
+            title = str(row.get('title') or '')
+            if not identifier.isdigit() or not role_candidate(title):
+                continue
+            locations = row.get('jobLocations') or []
+            location = next((l for l in locations if str(l.get('countryCode') or '').lower() in COUNTRIES), None)
+            if not location or not row.get('description'):
+                continue
+            posted = _parse_iso(row.get('publishedOn'))
+            if row.get('publishedOn') and (not posted or posted > checked):
+                continue
+            code = location['countryCode'].lower()
+            city = str(location.get('city') or '')
+            url = f'https://snoonu.keka.com/careers/jobdetails/{identifier}'
+            # Structured experience is retained alongside the JD, not silently
+            # replaced by a conflicting lower minimum in the prose.
+            experience = str(row.get('experience') or '').strip()
+            if re.fullmatch(r'\d{1,2}\s*[-–]\s*\d{1,2}(?:\s*years?)?', experience, re.I):
+                experience = re.sub(r'\s*years?$', '', experience, flags=re.I) + ' years of experience.'
+            description = 'Published experience requirement: ' + experience + '\n' + html.unescape(str(row['description']))
+            job = _clean_job({'id': identifier, 'title': title, 'company': 'Snoonu',
+                'location': ', '.join(filter(None, [city, COUNTRIES[code]])),
+                'description': description, 'url': url, 'date': posted,
+                'employment_type': {1: 'Part Time', 2: 'Full Time'}.get(row.get('jobType'), ''),
+                'salary': row.get('salaryRangeFormat') or ''}, 'Keka/Snoonu')
+            if job and fit(job, profile, settings)[0]:
+                jobs.append(mark(job, url, checked))
+    except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
+        errors.append('Snoonu: public active feed unavailable or changed; coverage is partial')
+    return jobs, errors

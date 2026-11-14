@@ -1,7 +1,13 @@
 // Public-vacancy view. Applying is always a user action on the employer site.
-let gulfOpenView=false;
+let gulfOpenView=false,savedPostingWindow="3";
 function selectJobMarket(gulf){
+  const days=document.getElementById('filterPosted');
+  if(!gulfOpenView)savedPostingWindow=days.value;
   gulfOpenView=!!gulf;
+  if(gulfOpenView){if(!days.querySelector('option[value="checked"]'))days.add(new Option('Published · checked within 36 hours','checked'));days.value='checked';}
+  else{days.value=savedPostingWindow;days.querySelector('option[value="checked"]')?.remove();}
+  days.title=gulfOpenView?'Original posting dates retained; publication evidence expires after 36 hours.':'';
+  ['statTotal','statNew','statHigh'].forEach(id=>document.getElementById(id).textContent='—');
   document.getElementById('gulfMarketBtn').setAttribute('aria-pressed',String(gulfOpenView));
   document.getElementById('savedMarketBtn').setAttribute('aria-pressed',String(!gulfOpenView));
   document.getElementById('gulfRefreshBtn').hidden=!gulfOpenView;
@@ -9,6 +15,7 @@ function selectJobMarket(gulf){
   document.getElementById('filterCountry').value='';
   document.getElementById('filterPosted').disabled=gulfOpenView;
   document.getElementById('filterScore').value=gulfOpenView?'0':'65';
+  document.querySelectorAll('.chip[data-score]').forEach(chip=>chip.classList.toggle('active',chip.dataset.score===document.getElementById('filterScore').value));
   document.getElementById('filterSource').value='';
   document.getElementById('filterStatus').value='';
   loadJobs();
@@ -24,10 +31,10 @@ async function refreshGulfJobs(){
 }
 async function loadGulfSources(){
   if(!privateConnectionReady())return;
-  try{const data=await privateApi('/api/gulf/sources');
+  const epoch=authEpoch;try{const data=await privateApi('/api/gulf/sources');if(epoch!==authEpoch||!privateConnectionReady())return;
     document.getElementById('gulfSourcesNote').textContent=data.note+' Feed status: '+(data.feed?.status||'not checked')+(data.feed?.detail?' · '+data.feed.detail:'');
     document.getElementById('gulfSourcesGrid').innerHTML=(data.items||[]).map(item=>'<a class="gulf-source" href="'+esc(item.url)+'" target="_blank" rel="noopener noreferrer"><strong>'+esc(item.name)+' ↗</strong><span>'+esc(item.mode==='direct'?'Direct employer feed':item.mode==='indexed'?'Indexed coverage':'External career page')+'</span><small>'+esc(item.note)+'</small></a>').join('');
-  }catch(e){document.getElementById('gulfSourcesNote').textContent='Could not load Gulf sources: '+e.message}
+  }catch(e){if(epoch!==authEpoch||!privateConnectionReady())return;document.getElementById('gulfSourcesNote').textContent='Could not load Gulf sources: '+e.message}
 }
 async function viewJob(jobId){
   const epoch=authEpoch;
@@ -35,7 +42,7 @@ async function viewJob(jobId){
     document.getElementById('jobDetailTitle').textContent=job.title;
     document.getElementById('jobDetailCompany').textContent=[job.company,job.location].filter(Boolean).join(' · ');
     document.getElementById('jobDetailEvidence').textContent=job.published_recently_checked?'Listed as published in employer feed · checked '+ago(job.gulf_evidence.checked_at)+'. Availability can change.':'Current application availability has not been verified. Check the original listing.';
-    document.getElementById('jobDetailDate').textContent='Posted: '+(job.posted_at?new Date(job.posted_at).toLocaleDateString():'Not published')+' · Salary: '+(job.salary||'Not published');
+    document.getElementById('jobDetailDate').textContent='Posted: '+(job.posted_at?new Date(job.posted_at).toLocaleDateString():'Not published')+' · Closes: '+(job.gulf_evidence?.valid_until?new Date(job.gulf_evidence.valid_until).toLocaleString():'Not published')+' · Salary: '+(job.salary||'Not published');
     document.getElementById('jobDetailFit').textContent=(job.fit_notes||[]).join('\n');
     document.getElementById('jobDetailDescription').textContent=job.description||'Read the full requirements on the original employer page.';
     const link=document.getElementById('jobApplyLink'),url=job.apply_url||job.url;
