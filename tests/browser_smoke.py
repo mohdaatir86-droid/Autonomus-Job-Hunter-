@@ -182,6 +182,7 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             expect(page.locator('#jobsBody select')).to_have_value('new')
             page.set_viewport_size({'width':375,'height':667})
             assert page.locator('#jobDetailDialog').bounding_box()['width']<=375
+            assert page.locator('#jobDetailDialog').evaluate('(e)=>e.scrollWidth<=e.clientWidth'), 'Gulf dialog content must not overflow on iPhone'
             page.screenshot(path=str(output/'gulf-job-detail-375.png'),full_page=False)
             page.locator('#jobDetailDialog button').filter(has_text='Close').click()
             expect(page.locator('#jobsBody select')).to_have_value('new')
