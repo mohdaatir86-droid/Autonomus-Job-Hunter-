@@ -25,6 +25,12 @@ def test_empty_postgres_bootstrap_and_repeatable_workflow(monkeypatch):
             job_sources.ensure_job_columns()
             job_sources.ensure_job_columns()
             assert client.get('/api/jobs', headers=headers).status_code == 200
+            for scope in ['', '?gulf_open=true', '?gulf_open=true&country=Qatar&q=' + unique]:
+                stats = client.get('/api/stats' + scope, headers=headers)
+                assert stats.status_code == 200
+                listed = client.get('/api/jobs' + scope, headers=headers).json()['items']
+                assert stats.json()['total_jobs'] == len(listed)
+
             import outreach_program
             research = outreach_program.save({'enabled':False,'job_found':False})
             assert research['enabled'] is False
