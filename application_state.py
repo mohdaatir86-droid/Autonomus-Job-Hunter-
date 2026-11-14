@@ -18,7 +18,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from database import connect as db_connect, postgres_enabled
+from database import connect as db_connect, postgres_enabled, postgres_initialization_once
 from job_hunter import DB_PATH
 
 VALID_STATES = frozenset({
@@ -81,6 +81,7 @@ def stable_job_key(portal: str, source_id: str | None, url: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
 
 
+@postgres_initialization_once
 def init_application_state_db() -> None:
     with db_connect(DB_PATH) as conn:
         if postgres_enabled():

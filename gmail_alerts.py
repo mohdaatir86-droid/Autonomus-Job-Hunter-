@@ -21,7 +21,7 @@ from urllib.parse import urlencode, urlsplit
 import httpx
 
 from job_hunter import DB_PATH, normalize_text, detect_country
-from database import connect as db_connect, postgres_enabled
+from database import connect as db_connect, postgres_enabled, postgres_initialization_once
 
 log = logging.getLogger("job-hunter")
 
@@ -60,6 +60,7 @@ def _connect():
     return db_connect(DB_PATH)
 
 
+@postgres_initialization_once
 def init_gmail_db():
     with _connect() as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS gmail_oauth_states (state_hash TEXT PRIMARY KEY, expires_at BIGINT NOT NULL)")

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pypdf import PdfReader
 
-from database import connect as db_connect, postgres_enabled
+from database import connect as db_connect, postgres_enabled, postgres_initialization_once
 from job_hunter import DB_PATH
 
 # Public repository defaults must never contain real candidate contact details or personal claims.
@@ -30,6 +30,7 @@ def _connect():
     return db_connect(DB_PATH)
 
 
+@postgres_initialization_once
 def init_workflow_db():
     import resume_store
     resume_store.initialize()

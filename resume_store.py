@@ -3,9 +3,10 @@ import base64
 import hashlib
 from datetime import datetime, timezone
 
-from database import connect
+from database import connect, postgres_initialization_once
 
 
+@postgres_initialization_once
 def initialize():
     with connect() as db:
         db.execute('''CREATE TABLE IF NOT EXISTS outreach_resume (
@@ -28,13 +29,15 @@ def get(db=None, include_bytes=False):
     if db is None:
         with connect() as connection:
             return get(connection, include_bytes)
-    row = db.execute('SELECT * FROM outreach_resume WHERE id=1').fetchone()
+    columns = 'id,filename,sha256,version,uploaded_at,size_bytes'
+    if include_bytes:
+        columns += ',content_b64'
+    row = db.execute('SELECT '+columns+' FROM outreach_resume WHERE id=1').fetchone()
     if not row:
         return None
     result = dict(row)
-    encoded = result.pop('content_b64')
     if include_bytes:
-        content = base64.b64decode(encoded, validate=True)
+        content = base64.b64decode(result.pop('content_b64'), validate=True)
         if not content.startswith(b'%PDF') or hashlib.sha256(content).hexdigest() != result['sha256']:
             raise ValueError('Stored resume integrity check failed. Upload your PDF again.')
         result['content'] = content

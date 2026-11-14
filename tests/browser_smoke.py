@@ -240,21 +240,21 @@ with tempfile.TemporaryDirectory(prefix='job-hunter-browser-') as temporary:
             google_context=browser.new_context(viewport={'width':1440,'height':1100})
             google_page=google_context.new_page()
             google_page.on('pageerror',lambda e:errors.append(str(e)))
-            delayed_readiness=[]
+            delayed_setup=[]
             def google_route(route):
                 if not route.request.url.startswith(base):return route.abort()
                 if route.request.url==base+'/api/auth/session':
                     return route.fulfill(status=200,json={'authenticated':True,'email':'candidate@example.com'})
-                if route.request.url==base+'/api/operational-readiness':
-                    delayed_readiness.append(route)
+                if route.request.url==base+'/api/setup':
+                    delayed_setup.append(route)
                     return
                 headers={**route.request.headers,'Authorization':'Bearer fixture-frontend-owner-private-key-00001'}
                 return route.continue_(headers=headers)
             google_page.route('**/*',google_route)
             google_page.goto(base+'/#applications',wait_until='domcontentloaded')
             expect(google_page.locator('#applicationsBody')).to_contain_text('Example Logistics')
-            assert len(delayed_readiness)==1, 'The active view must load while background diagnostics are still pending'
-            delayed_readiness[0].fulfill(status=503,json={'detail':'Fixture delayed readiness'})
+            assert len(delayed_setup)==1, 'The active view must load while optional preference setup is still pending'
+            delayed_setup[0].fulfill(status=200,json={'settings':{'posted_within_days':7},'notifications':{'configured':False}})
             google_page.wait_for_load_state('networkidle')
             expect(google_page.locator('#profileName')).to_have_value('Fixture Candidate')
             assert google_page.evaluate("localStorage.getItem('jobHunterPortalAccessToken')") is None
