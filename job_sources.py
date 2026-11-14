@@ -11,12 +11,14 @@ from typing import Any
 from urllib.parse import quote_plus, urlsplit, urlunsplit, parse_qsl, urlencode
 
 import httpx
+from database import postgres_initialization_once
 
 from job_hunter import (
     connect,
     init_db,
     get_settings,
     score_job,
+    is_relevant_role,
     normalize_text,
     detect_country,
     now_iso,
@@ -56,8 +58,13 @@ def is_target_market_job(job, country=None):
     market = country or detect_country(job.get("location"), job.get("title", ""), job.get("description", ""))
     return market in LISTABLE_COUNTRIES
 
-def build_search_queries(settings):
-    roles = settings.get("target_titles", ["Operations Manager", "Cluster Manager", "Area Manager"])[:3]
+def build_search_queries(settings, reference_time=None):
+    # Cover all saved roles over scheduled ticks without increasing lookup count.
+    saved = list(dict.fromkeys(str(role).strip() for role in settings.get("target_titles", []) if str(role).strip()))
+    saved = saved or ["Operations Manager", "Cluster Manager", "Area Manager"]
+    moment = reference_time or datetime.now(timezone.utc)
+    start = (int(moment.timestamp()) // (6 * 3600) * 3) % len(saved)
+    roles = [saved[(start + index) % len(saved)] for index in range(min(3, len(saved)))]
     countries = settings.get("target_countries", DEFAULT_COUNTRIES)
     queries = []
     if "India" in countries:
@@ -290,6 +297,7 @@ def normalize_job_url(url: str) -> str:
     return urlunsplit((parts.scheme.lower(), host, path, query, ""))
 
 
+@postgres_initialization_once
 def ensure_job_columns():
     init_db()
     from database import postgres_enabled
@@ -681,7 +689,7 @@ async def _hunt_jobs_locked():
     with connect() as conn:
         for job in fetched:
             score, reasons, country = score_job(job, settings)
-            if country not in settings.get("target_countries", DEFAULT_COUNTRIES) or not is_target_market_job(job, country) or not matches_preferences({**job, "country": country}, settings):
+            if not is_relevant_role(job) or country not in settings.get("target_countries", DEFAULT_COUNTRIES) or not is_target_market_job(job, country) or not matches_preferences({**job, "country": country}, settings):
                 continue
             sources_touched.add(job.get("source") or "?")
             normalized_url = normalize_job_url(job["url"])
@@ -845,7 +853,7 @@ def list_jobs(
     with connect() as conn:
         for record in conn.execute(sql, params):
             row = dict(record)
-            if not tracked and not matches_preferences(row, settings):
+            if not tracked and (not is_relevant_role(row) or not matches_preferences(row, settings)):
                 continue
             if eligible >= offset:
                 rows.append(row)
@@ -873,7 +881,7 @@ def get_stats():
     with connect() as conn:
         for record in conn.execute("SELECT * FROM jobs WHERE posted_at>=? AND country IN (" + placeholders + ")", (cutoff, *allowed)):
             job = dict(record)
-            if not matches_preferences(job, settings):
+            if not is_relevant_role(job) or not matches_preferences(job, settings):
                 continue
             total += 1
             new_count += job["status"] == "new"

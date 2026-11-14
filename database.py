@@ -6,6 +6,9 @@ the app uses SQLite at DATABASE_PATH (default: ./job_hunter.db).
 from __future__ import annotations
 
 import os
+import hashlib
+from functools import wraps
+from threading import RLock
 import re
 import sqlite3
 from collections.abc import Mapping
@@ -15,6 +18,32 @@ from urllib.parse import urlsplit, urlunsplit
 
 def postgres_enabled() -> bool:
     return bool(os.getenv("DATABASE_URL", "").strip())
+
+
+def postgres_initialization_once(function):
+    """Run schema/default setup once per process and PostgreSQL database.
+
+    This caches successful initialization only, never profile data, permissions,
+    settings or send claims. SQLite keeps its existing per-file bootstrap flow.
+    A fresh worker/redeploy initializes again; failed setup is safe to retry.
+    """
+    initialized = set()
+    lock = RLock()
+
+    @wraps(function)
+    def initialize(*args, **kwargs):
+        url = os.getenv("DATABASE_URL", "").strip()
+        if not url:
+            return function(*args, **kwargs)
+        identity = hashlib.sha256(url.encode()).digest()
+        with lock:
+            if identity not in initialized:
+                result = function(*args, **kwargs)
+                initialized.add(identity)
+                return result
+        return None
+
+    return initialize
 
 
 class HybridRow(Mapping):

@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from database import connect as db_connect, postgres_enabled
+from database import connect as db_connect, postgres_enabled, postgres_initialization_once
 
 log = logging.getLogger("job-hunter")
 DB_PATH = os.getenv("DATABASE_PATH", "job_hunter.db")
@@ -128,6 +128,7 @@ def connect():
     return db_connect(DB_PATH)
 
 
+@postgres_initialization_once
 def init_db():
     if postgres_enabled():
         # PostgreSQL schema is provisioned through the Supabase migration.
@@ -217,6 +218,36 @@ def detect_country(location, title="", description=""):
     return "Unspecified"
 
 
+def role_context(job):
+    """Keep physical-operations evidence separate from generic KPI terminology."""
+    title = normalize_text(job.get("title")).lower()
+    description = normalize_text(job.get("description")).lower()
+    physical_terms = ["warehouse", "warehousing", "fulfil", "fulfill", "supply chain", "logistics",
+                      "last mile", "last-mile", "dark store", "distribution", "city operations",
+                      "store operations", "fleet", "quick commerce", "q-commerce", "qsr",
+                      "restaurant operations", "multi-unit operations", "multi unit operations"]
+    groups = [
+        ["warehouse", "warehousing", "fulfil", "fulfill", "dark store", "distribution centre", "distribution center"],
+        ["last mile", "last-mile", "logistics", "supply chain", "fleet"],
+        ["qsr", "restaurant operations", "food delivery", "quick commerce", "q-commerce"],
+        ["store operations", "retail operations", "multi-unit", "multi unit", "store launch"],
+    ]
+    physical = any(term in title for term in physical_terms) or sum(
+        any(term in description for term in group) for group in groups
+    ) >= 2 or bool(re.search(r"\b(?:warehouse|fulfilment|fulfillment|dark store|supply chain|last[ -]mile|qsr|restaurant|store) operations\b", description))
+    # A software/HR/sales job at a logistics employer is still a different role.
+    unrelated = any(term in title for term in ["software", "engineer", "engineering", "security", "developer",
+        "data science", "machine learning", "finance", "accounting", "sales", "marketing",
+        "talent acquisition", "human resources", "product manager", "it support", "technical program",
+        "technical programme", "solutions architect"]) or bool(re.search(r"\b(?:it|hr)\b", title))
+    generic_program = any(term in title for term in ["program manager", "programme manager"]) and not physical
+    return unrelated, generic_program, physical
+
+
+def is_relevant_role(job):
+    return not role_context(job)[0]
+
+
 def score_job(job, settings):
     title = normalize_text(job.get("title")).lower()
     location = normalize_text(job.get("location")).lower()
@@ -245,20 +276,7 @@ def score_job(job, settings):
     ):
         role_score = 20
         reasons.append("Adjacent operations role")
-    domain_terms = [
-        "warehouse", "fulfil", "fulfill", "supply chain", "logistics", "last mile", "last-mile",
-        "dark store", "cluster", "distribution", "city operations", "store operations", "fleet",
-        "delivery", "inventory", "quick commerce", "q-commerce",
-    ]
-    non_ops_terms = [
-        "software", "engineer", "engineering", "security", "developer", "data science",
-        "machine learning", "finance", "accounting", "sales", "marketing",
-        "talent acquisition", "human resources", "hr ",
-    ]
-    title_is_non_ops = any(term in title for term in non_ops_terms) and not any(term in title for term in domain_terms)
-    generic_program_manager = any(term in title for term in ["program manager", "programme manager"]) and not any(
-        term in title for term in domain_terms + ["operations"]
-    )
+    title_is_non_ops, generic_program_manager, physical_context = role_context(job)
     if title_is_non_ops:
         role_score = min(role_score, 8)
         reasons = ["Title appears outside the target operations domain"]
@@ -349,6 +367,12 @@ def score_job(job, settings):
         score = min(score, 12)
     elif generic_program_manager:
         score = min(score, 24)
+    elif role_score == 5:
+        score = min(score, 24)
+        reasons.append("Role title needs review")
+    elif "operations" in title and not physical_context:
+        score = min(score, 64)
+        reasons.append("Physical operations context needs review")
     if country in {"Unspecified", "Remote / Unspecified"}:
         score = min(score, 64)
     return score, reasons, country

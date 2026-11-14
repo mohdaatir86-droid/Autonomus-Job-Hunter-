@@ -120,3 +120,34 @@ def test_postgres_campaign_schema_and_resume_survive_reinitialization(monkeypatc
         assert resume_store.get(include_bytes=True)['content']==content
         with outreach.connect() as db:
             assert db.execute('SELECT kind FROM outreach_campaigns WHERE id=?',(c['id'],)).fetchone()[0]=='introduction'
+
+
+def test_postgres_warm_reads_do_not_repeat_schema_or_default_writes(monkeypatch):
+    import database, gmail_alerts, automation_settings, resume_store
+    url = os.getenv('TEST_POSTGRES_URL')
+    if not url:
+        pytest.skip('TEST_POSTGRES_URL not configured')
+    monkeypatch.setenv('DATABASE_URL', url)
+    monkeypatch.setenv('ENABLE_SCHEDULER', 'false')
+    with TestClient(main.app):
+        statements = []
+        execute = database.PgConnection.execute
+
+        def traced(connection, sql, params=()):
+            statements.append(sql.strip().upper())
+            return execute(connection, sql, params)
+
+        monkeypatch.setattr(database.PgConnection, 'execute', traced)
+        for _ in range(2):
+            job_hunter.get_settings()
+            application_workflow.get_profile()
+            gmail_alerts.get_gmail_status()
+            automation_settings.get_automation_settings()
+            job_sources.ensure_job_columns()
+            resume_store.get()
+        assert statements
+        assert all(sql.startswith('SELECT') for sql in statements), statements
+        assert not any('CONTENT_B64' in sql for sql in statements)
+        # Only initialization is cached: a settings edit remains immediately visible.
+        job_hunter.save_settings({'min_match_score': 57})
+        assert job_hunter.get_settings()['min_match_score'] == 57

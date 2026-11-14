@@ -6,7 +6,7 @@ is intentionally not enabled until a compliant, authenticated browser worker exi
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
-from database import connect, postgres_enabled
+from database import connect, postgres_enabled, postgres_initialization_once
 
 DEFAULTS = {
     "enabled": False,
@@ -23,6 +23,7 @@ DEFAULTS = {
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
+@postgres_initialization_once
 def init_automation_settings():
     with connect() as conn:
         if postgres_enabled():
