@@ -97,6 +97,19 @@ def test_noon_changed_detail_schema_is_not_reported_as_healthy():
     assert not jobs and errors
 
 
+@pytest.mark.parametrize('failure', ['http', 'timeout', 'network'])
+def test_noon_reports_actionable_failures_without_urls_or_provider_bodies(failure):
+    def handler(request):
+        if failure == 'http':
+            return httpx.Response(403, text='PRIVATE provider body')
+        error = httpx.ReadTimeout if failure == 'timeout' else httpx.ConnectError
+        raise error('PRIVATE failure at https://example.test/?key=SECRET', request=request)
+    jobs, errors = run(web.fetch_noon, handler)
+    assert not jobs and len(errors) == 1
+    assert {'http': 'HTTP 403', 'timeout': 'request timed out', 'network': 'network request failed'}[failure] in errors[0]
+    assert 'PRIVATE' not in errors[0] and 'SECRET' not in errors[0] and 'https://' not in errors[0]
+
+
 def run(function,handler):
     async def execute():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:

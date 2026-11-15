@@ -47,6 +47,19 @@ class _NoonListingHTML(HTMLParser):
             self.current['title'].append(data)
 
 
+def _noon_error(error, phase):
+    # HTTP exception strings can contain full URLs; never persist those strings.
+    if isinstance(error, httpx.HTTPStatusError):
+        reason = 'HTTP ' + str(error.response.status_code)
+    elif isinstance(error, httpx.TimeoutException):
+        reason = 'request timed out'
+    elif isinstance(error, httpx.RequestError):
+        reason = 'network request failed'
+    else:
+        reason = 'public response format changed'
+    return f'Noon: {phase} ({reason}); no new roles verified from this response'
+
+
 async def fetch_noon(client, profile, settings):
     from gulf_sources import COUNTRIES, fit, mark, role_candidate
     from job_sources import _clean_job, _parse_iso
@@ -76,8 +89,8 @@ async def fetch_noon(client, profile, settings):
                 candidates[card['id']] = title
         if listing.has_pagination or len(listing.cards) > 200 or len(candidates) > 30:
             errors.append('Noon: bounded operations/logistics selection; coverage is partial')
-    except (httpx.HTTPError, ValueError, TypeError, AttributeError):
-        return [], ['Noon: official public listing unavailable or changed; no roles verified']
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError) as error:
+        return [], [_noon_error(error, 'official public listing unavailable')]
 
     async def detail(identifier, title):
         try:
@@ -111,8 +124,8 @@ async def fetch_noon(client, profile, settings):
                 'date': posted, 'url': url, 'employment_type': data.get('employmentType') or ''}, 'Noon Careers')
             if job and fit(job, profile, settings)[0]:
                 return mark(job, url, checked, end)
-        except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
-            errors.append('Noon: a shortlisted public detail could not be verified')
+        except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError) as error:
+            errors.append(_noon_error(error, 'shortlisted public detail unavailable'))
         return None
 
     jobs = await asyncio.gather(*(detail(key, title) for key, title in list(candidates.items())[:30]))
