@@ -16,6 +16,109 @@ def _location(city, country):
     return city if country.lower() in city.lower() else ', '.join(filter(None, [city, country]))
 
 
+class _NoonListingHTML(HTMLParser):
+    """Read only the public cards; never execute scripts or use account APIs."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.cards = []
+        self.current = None
+        self.in_title = False
+        self.has_listing = False
+        self.has_pagination = False
+
+    def handle_starttag(self, tag, attributes):
+        attrs = dict(attributes)
+        if attrs.get('id') == 'jobs-list-panel':
+            self.has_listing = True
+        if tag == 'a' and re.search(r'[?&]page=\d+', attrs.get('href', '')):
+            self.has_pagination = True
+        if tag == 'div' and 'job-card' in attrs.get('class', '').split():
+            self.current = {'id': attrs.get('data-job-id', ''), 'title': []}
+            self.cards.append(self.current)
+        if tag == 'p' and 'job-card-title' in attrs.get('class', '').split():
+            self.in_title = True
+
+    def handle_endtag(self, tag):
+        if tag == 'p':
+            self.in_title = False
+
+    def handle_data(self, data):
+        if self.in_title and self.current is not None:
+            self.current['title'].append(data)
+
+
+async def fetch_noon(client, profile, settings):
+    from gulf_sources import COUNTRIES, fit, mark, role_candidate
+    from job_sources import _clean_job, _parse_iso
+    origin = 'https://joinnoon.com'
+    checked = datetime.now(timezone.utc).isoformat()
+    errors = []
+    semaphore = asyncio.Semaphore(4)
+
+    async def get(path, **kwargs):
+        async with semaphore:
+            response = await client.get(origin + path, timeout=15, follow_redirects=False, **kwargs)
+            response.raise_for_status()
+            if len(response.content) > 3_000_000:
+                raise ValueError('Oversized public response')
+            return response
+
+    try:
+        response = await get('/jobs', params={'department': 'Operations & Logistics'})
+        listing = _NoonListingHTML()
+        listing.feed(response.text)
+        if not listing.has_listing:
+            raise ValueError('Listing format changed')
+        candidates = {}
+        for card in listing.cards[:200]:
+            title = ' '.join(' '.join(card['title']).split())
+            if re.fullmatch(r'\d{1,10}', card['id']) and role_candidate(title):
+                candidates[card['id']] = title
+        if listing.has_pagination or len(listing.cards) > 200 or len(candidates) > 30:
+            errors.append('Noon: bounded operations/logistics selection; coverage is partial')
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+        return [], ['Noon: official public listing unavailable or changed; no roles verified']
+
+    async def detail(identifier, title):
+        try:
+            response = await get('/api/v1/jobs/' + identifier)
+            data = response.json()
+            if not isinstance(data, dict) or not {'id', 'title', 'country', 'isActive'}.issubset(data):
+                raise ValueError('Detail format changed')
+            # An active detail must also have been present in today's public list.
+            if str(data.get('id')) != identifier or data.get('isActive') is not True:
+                return None
+            if str(data.get('title') or '').strip() != title:
+                return None
+            country = COUNTRIES.get(str(data.get('country') or '').lower())
+            if not country:
+                return None
+            published = data.get('postedAt') or data.get('createdAt')
+            posted = _parse_iso(published)
+            closing = data.get('closesAt')
+            end = _parse_iso(closing)
+            if not posted or posted > checked or (closing and (not end or end <= checked)):
+                return None
+            description = '\n'.join(str(data.get(key) or '') for key in ('description', 'roleIntro', 'requirements'))
+            if not description.strip():
+                return None
+            number = str(data.get('jobNr') or '')
+            url = origin + ('/job/' + number if re.fullmatch(r'[A-Za-z0-9-]{1,120}', number) else '/jobs/' + identifier)
+            brand = str(data.get('nubCode') or '').strip()
+            company = 'Noon' if not brand or brand.lower() == 'noon' else 'Noon / ' + brand
+            job = _clean_job({'id': identifier, 'title': title, 'company': company,
+                'location': _location(data.get('city'), country), 'description': html.unescape(description),
+                'date': posted, 'url': url, 'employment_type': data.get('employmentType') or ''}, 'Noon Careers')
+            if job and fit(job, profile, settings)[0]:
+                return mark(job, url, checked, end)
+        except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
+            errors.append('Noon: a shortlisted public detail could not be verified')
+        return None
+
+    jobs = await asyncio.gather(*(detail(key, title) for key, title in list(candidates.items())[:30]))
+    return [job for job in jobs if job], list(dict.fromkeys(errors))
+
+
 async def fetch_amazon(client, profile, settings):
     from gulf_sources import fit, mark, role_candidate
     from job_sources import _clean_job, _parse_iso

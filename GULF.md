@@ -5,16 +5,16 @@ Arabia, Qatar, Kuwait, Oman and Bahrain. It does not overwrite saved preferences
 
 ## Coverage
 
-The private source catalog contains 22 entries. Thirteen entries have direct public
+The private source catalog contains 22 entries. Fourteen entries have direct public
 imports: Delivery Hero (publisher-provided brands including Talabat), Careem,
-Lalamove, GMG, Aramex, Al-Futtaim, DP World, Landmark Group, Snoonu, Amazon, Alshaya, DHL and Majid Al Futtaim. SmartRecruiters uses its documented Posting API.
+Lalamove, GMG, Aramex, Al-Futtaim, DP World, Landmark Group, Snoonu, Amazon, Alshaya, DHL, Majid Al Futtaim and Noon. SmartRecruiters uses its documented Posting API.
 Greenhouse, Lever and employer RSS need no API key. Aramex RSS contains a bounded
 selection and is explicitly reported as partial coverage. Zero matching vacancies
 is valid and must not be filled with unrelated jobs.
 
 Seven job boards retain their existing Google Jobs / authorised email-alert
-coverage. Two other employer pages, Noon and Kitopi, are external career links,
-not direct integrations. Kitopi's employer-linked Lever board returned 404 during
+coverage. Kitopi remains an external career link, not a direct integration.
+Kitopi's employer-linked Lever board returned 404 during
 inspection; it is deliberately not presented as working. Site presence in the
 catalog never promises comprehensive coverage or that every job is open.
 
@@ -94,9 +94,15 @@ market responses and prevent signed-out data from being restored. Original
 posting dates and available closing dates remain visible in the detail dialog.
 
 Noon's own company page links to https://joinnoon.com/ . The public operations
-search is https://joinnoon.com/jobs?department=Operations+%26+Logistics . It was
-verified as an employer career search with published roles, but no direct import
-is implemented. Its listings must not be counted as imported jobs. Kitopi's
+search is https://joinnoon.com/jobs?department=Operations+%26+Logistics . The importer
+reads the published cards and their public `/api/v1/jobs/{id}` details, the same
+endpoint used by the careers page. IDs and titles must agree with the current
+list, `isActive` must be true, the country must be explicit, and posting/closing
+dates and profile fit must pass. It reads at most 200 cards and 30 shortlisted
+details with four concurrent requests and the existing 60-second provider budget.
+Posting dates are retained, and public brand names are shown under Noon. It does
+not access candidate accounts or apply; original career links can require employer
+login. This operations/logistics selection is not all Noon vacancies. Kitopi's
 https://www.kitopi.com/careers remains the original career destination; a reliable
 current employer-authorised public feed could not be verified. Search-index
 snapshots or a similarly named ATS tenant do not establish current availability.

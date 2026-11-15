@@ -1,114 +1,72 @@
-# Codex handoff — finish Gulf discovery and release validation
+# Autonomous Job Hunter — release continuation
 
-## Project and production baseline
+## Current project
 
 - Repository: `mohdaatir86-droid/Autonomus-Job-Hunter-`
-- Live portal: https://autonomous-job-hunter-docker.onrender.com
-- Render workspace: `tea-dbc7ulrrjlhs73b4vjg0`
-- Render service: `srv-dbfqlirl550s738v1drg`
-- Last verified production source: `8cacb0c2eab08c7509ef7e47dc641d87c3d681a8` (PR #39).
-- Continue branch `feat/snoonu-feed-relevance`. This handoff branch is not deployed.
+- Canonical workspace: https://autonomous-job-hunter-docker.onrender.com
+- Existing Render workspace: `tea-dbc7ulrrjlhs73b4vjg0`
+- Existing Render service: `srv-dbfqlirl550s738v1drg`
+- Existing Vercel project: `prj_DQaTsQnXsKoBdHx4GJQt6xuWwJcc`
+- Vercel team: `team_0Y8wp3QBt9XCneVXL4Zi0h5P`
+- Vercel entry: https://autonomous-job-hunter-ui.vercel.app
 
-Production previously had 22 catalog entries, eight direct employer imports,
-seven indexed boards and seven external employer links. Nine published operations/
-store vacancies were visible at the last production UI check; that is an observed
-snapshot, not a current-count guarantee. Read current production state afresh.
-Existing architecture is FastAPI + vanilla HTML/JS + durable PostgreSQL. Preserve
-it, authentication, CSRF, private PDF storage, Gmail OAuth, outreach approvals and
-tracked application history. Keep LinkedIn Autonomous and other projects separate.
+## Established baseline (15 November 2026)
 
-## Prepared changes on this branch
+PR #40 was merged as `0b8b1530dc3b7fc8fb0ef4af6d6c0233c80f2b9e`. Its Render
+deploy `dep-dbs8imdckfvc73db5veg` was live. GitHub PostgreSQL and browser CI passed
+on that merge. Scheduled discovery runs on the same commit succeeded. The signed-in
+portal reported Gmail alerts working and the latest scheduled hunt fetched 465
+listings and saved 32 new records. A Gulf-only refresh returned 17 current-profile
+roles, 0 new and 17 updated, preserving their original dates and application
+statuses. These are observed snapshots, not current-count guarantees.
 
-- Snoonu public active-job import from the first-party Keka embed endpoint.
-  Explicit countries, original publication dates, full descriptions and structured
-  experience ranges; technical logistics titles excluded. Public feed provenance
-  was inspected in the employer's own career page/embed script.
-- Amazon Jobs public search JSON restricted to Gulf ISO3 country codes, preserving
-  basic/preferred qualifications and original posting dates.
-- Alshaya public listing/detail parser with original Apply now control, explicit
-  job location and closing-time checks; bounded published listing pages.
-- DHL and Majid Al Futtaim public HTML-embedded JSON adapters. Parse JSON only,
-  never execute webpage JS. Bound global scans to 60 search results and validate
-  external active job details separately. These sources have partial coverage;
-  do not describe them as exhaustive Gulf integrations.
-- Recognise genuine store/regional operations leadership titles in scoring only
-  when physical operations context exists. Exclude technical leadership titles.
-  Score explicitly requested Gulf countries consistently during verified imports
-  without rewriting saved country preferences.
-- Correct score-chip active state when switching markets; version the changed
-  Gulf JS resource to avoid mixed browser caches.
+The Vercel production alias was still serving an obsolete static UI with its
+private API rewrite pointed at the old native-Python service. The tracked
+`vercel.json` now routes that compatibility link to the current canonical workspace.
+This deliberately keeps Google/Gmail OAuth state and cookies on the working
+origin and makes future UI updates follow the Render release automatically.
+Deploy this config through the EXISTING Vercel project, not a new one.
 
-The branch catalog has thirteen direct-import configurations, seven indexed
-boards, and two external links. Those are code/configuration counts, not claims
-that every provider currently responds or every listing is open. Noon has no
-verified reliable public direct feed. Kitopi's employer-linked Lever board
-returned 404; the similarly named SmartRecruiters board was empty and was not
-established as the employer's current authorised feed. Keep their status honest.
+## Changes in the current release
 
-## Evidence already collected
+- Direct Noon operations/logistics import using published cards and the careers
+  page's public job-detail JSON. Match IDs/titles, explicit countries, active state,
+  original posting dates, closing dates and profile experience. Bound page size,
+  requests and concurrency; never access candidate or application APIs.
+- Source catalog: 14 configured direct imports, 7 indexed boards and 1 external
+  link (Kitopi). These are configurations, not successful-provider counts.
+- Gulf refresh reloads source health and readiness alongside the list/counts,
+  and its changed browser resource has a new version.
+- Vercel canonical routing removes stale copied UI and the incorrect API backend.
 
-- Latest local full suite: **318 passed, 5 PostgreSQL-only skipped**.
-- JS syntax checks and `git diff --check` passed.
-- Mock tests cover new API/page parsers, malformed schemas, explicit country
-  requirements, dates, closed/missing-apply cases, URL/redirect restrictions,
-  exclusion of internal recruiter fields, and no JS execution.
-- Small read-only public probes returned relevant Snoonu, Amazon, Alshaya and
-  Majid Al Futtaim records. DHL returned no matching Gulf roles in the bounded
-  sample. Probe results were not seeded into production or represented as live
-  portal imports.
-- Full PostgreSQL CI/mobile smoke checks and deployment of this branch remain.
-- No recruiter messages, job submissions or paid enrichment tests were sent.
+## Release gates
 
-## Finish before release
+Run the full local suite, PostgreSQL/browser CI, JS syntax and diff checks.
+Then merge the exact tested PR head, monitor the existing Render deploy to live,
+and deploy/verify the existing Vercel project. Confirm private routes remain
+locked, Gmail/profile readiness, a Gulf-only refresh, relevant Noon imports and
+original application links. The Vercel entry must resolve to the canonical
+workspace, including source/profile deep links.
 
-1. Read `GULF.md`, this document and the actual diff. Verify current branch/main
-   heads and working tree. Review new adapter failure handling, explicit dates,
-   country agreement, profile fit, public-only data access and bounded network
-   behaviour. Do not merge an unreviewed or failing branch.
-2. Fix the remaining Gulf dashboard summary mismatch: `loadStats()` currently
-   shows the normal saved-country/three-day totals even when the Gulf view lists
-   older but recently checked published jobs. Add an authenticated Gulf statistics
-   scope using the same eligibility/freshness rules as the Gulf list, and guard
-   stale responses on market switching/sign-out. Make the disabled posting-window
-   control accurately describe the Gulf freshness rule while preserving the saved
-   normal posting window. This was identified but is NOT implemented here.
-3. Review indexed-source health separately from direct imports. SerpApi has had
-   intermittent timeouts. Never mark indexed coverage or external career links
-   as a working direct feed, or claim all Internet sites are covered.
-4. Improve remaining source coverage only with a proven official/public path.
-   Do not bypass sign-in/bot blocks, invent APIs/addresses, request secrets in
-   chat, spend provider credits merely to test, or pad results with junior,
-   technical or mismatched jobs. If a source cannot be completed, show the precise
-   limitation and original career link rather than leaving a fake integration.
-5. Run meaningful full checks, including PostgreSQL and the existing browser
-   fixtures at 375/390/430px. Extend the mocked browser scenario to cover correct
-   Gulf totals, posting-window state, market switches and sign-out races.
-6. After checks pass, merge using the expected head SHA, deploy through the
-   EXISTING Render service and monitor the exact deployment to `live`. Verify
-   health, private endpoint authentication, source health and mobile usability.
-7. Use the private **Gulf-only refresh** from the portal for real preparation.
-   `/api/gulf/refresh` reads public sources only; do not substitute the full hunt
-   merely to test because it also uses other configured integrations. Confirm
-   newly imported jobs, duplicate prevention/history retention, and original
-   application links without submitting any applications.
+Local browser launch is restricted in this executor (Chromium singleton socket /
+ptrace denied). Use the GitHub CI browser fixture result and the attached live
+browser for production verification; do not represent fixture emails as real sends.
 
-## Preserve existing outreach boundaries
+## Remaining platform limits
 
-Job applications remain manual on original employer pages. Opening a link never
-marks an application submitted. Preserve existing reviewed-draft protections,
-private approved PDF attachment checks, shared sending cap, persistent duplicate/
-suppression records, reply/bounce/opt-out stops and scheduling coordination. Do
-not activate campaigns or send recruiter mail as part of this handoff. Any final
-campaign activation requires the concrete targeting/rules/recipient/content/resume
-preview and the user's activation decision. Do not treat Gmail accepting a
-message as inbox delivery. Do not claim authorisation, qualifications, notice
-period, achievements or personal connections that the saved profile does not
-confirm.
+Kitopi's official careers link still leads to a 404 Lever board; keep its status
+external until an employer-authorised source is verified. Some RSS/global feeds
+are bounded and partial. SerpApi has intermittent per-query timeouts/quota limits.
+Google testing-mode grants may require later reconnects. Applications remain
+manual on original employer pages; opening a link never marks it applied.
+Render free-service sleep pauses in-process preparation/research timers; GitHub
+discovery wakes the service every six hours. Do not promise continuous background
+operation while the service sleeps.
 
-## Final report
+## Preserve boundaries
 
-Report implemented and verified changes, current imported job count, direct vs
-indexed vs external coverage, actual provider limitations/configuration, tests,
-deployment evidence and the live portal link. Distinguish production observations
-from code configuration and test fixtures. List only genuinely unresolved items;
-do not claim complete automation or sending without evidence.
+Keep LinkedIn Autonomous and other projects separate. Preserve authentication,
+CSRF, durable PostgreSQL, private PDFs, application history, reviewed outreach,
+duplicate/suppression checks, reply/opt-out stops and shared limits. Do not send
+recruiter email, activate campaigns, spend enrichment credits or submit job forms
+while verifying this release. Check live state before changing policies.

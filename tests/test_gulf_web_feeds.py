@@ -9,6 +9,93 @@ PROFILE={'experience_summary':'9+ years of operations experience'}
 SETTINGS={'work_arrangement':'all'}
 
 
+def noon_listing(title='Operations Manager', identifier='28'):
+    return f'<div id="jobs-list-panel"><div class="job-card" data-job-id="{identifier}"><p class="job-card-title">{title}</p></div></div>'
+
+
+def noon_detail(**changes):
+    data = {'id': 28, 'jobNr': 'NOON-OPS-0028', 'title': 'Operations Manager', 'country': 'ae',
+            'city': 'Dubai', 'nubCode': 'noon Minutes', 'isActive': True,
+            'postedAt': '2026-04-23T09:11:59', 'createdAt': '2026-01-01T00:00:00Z', 'closesAt': None,
+            'roleIntro': '<p>Warehouse operations inventory SLA dispatch team leadership</p>',
+            'requirements': '<p>Minimum 5 years of experience.</p>', 'employmentType': 'full-time',
+            'recruiterEmail': 'PRIVATE@example.com'}
+    return {**data, **changes}
+
+
+def test_noon_public_listing_and_active_detail_preserve_date_brand_and_requirements():
+    calls = []
+    def handler(request):
+        calls.append(request)
+        if request.url.path == '/jobs':
+            assert request.url.params['department'] == 'Operations & Logistics'
+            return httpx.Response(200, text=noon_listing())
+        assert request.url.path == '/api/v1/jobs/28'
+        return httpx.Response(200, json=noon_detail())
+    jobs, errors = run(web.fetch_noon, handler)
+    assert len(jobs) == 1 and not errors and len(calls) == 2
+    job = jobs[0]
+    assert job['posted_at'] == '2026-04-23T09:11:59+00:00'
+    assert job['source_id'] == '28' and job['company'] == 'Noon / noon Minutes'
+    assert job['url'] == 'https://joinnoon.com/job/NOON-OPS-0028'
+    assert 'Minimum 5 years' in job['description']
+    assert 'PRIVATE' not in job['description'] + job['raw_json']
+    assert gulf.current_evidence(job)
+    assert not any('login' in r.url.path or 'application' in r.url.path for r in calls)
+
+
+@pytest.mark.parametrize('changes', [
+    {'isActive': False}, {'isActive': 'true'}, {'id': 29}, {'country': 'in'}, {'country': ''},
+    {'title': 'Another Operations Manager'}, {'postedAt': 'not-a-date'},
+    {'postedAt': '2099-01-01T00:00:00Z'}, {'closesAt': '2000-01-01T00:00:00Z'},
+    {'closesAt': 'invalid'}, {'requirements': '4–7 years of experience in logistics operations'},
+])
+def test_noon_rejects_inactive_inconsistent_dates_countries_and_experience(changes):
+    def handler(request):
+        return httpx.Response(200, text=noon_listing()) if request.url.path == '/jobs' else httpx.Response(200, json=noon_detail(**changes))
+    jobs, errors = run(web.fetch_noon, handler)
+    assert not jobs
+
+
+def test_noon_does_not_follow_redirects_or_manufacture_health_from_changed_html():
+    for response in [httpx.Response(302, headers={'location': 'https://untrusted.test/'}),
+                     httpx.Response(200, text='<h1>Maintenance</h1>')]:
+        calls = []
+        def handler(request):
+            calls.append(request)
+            return response
+        jobs, errors = run(web.fetch_noon, handler)
+        assert not jobs and errors and len(calls) == 1
+
+
+def test_noon_ignores_unlisted_junior_and_unsafe_identifiers():
+    calls = []
+    listing = noon_listing('Operations Associate', '1') + noon_listing('Operations Manager', '../private')
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, text=listing)
+    jobs, errors = run(web.fetch_noon, handler)
+    assert not jobs and not errors and len(calls) == 1
+
+
+def test_noon_detail_failures_are_partial_and_other_records_survive():
+    def handler(request):
+        if request.url.path == '/jobs':
+            return httpx.Response(200, text=noon_listing() + noon_listing(identifier='29'))
+        if request.url.path.endswith('/29'):
+            return httpx.Response(503)
+        return httpx.Response(200, json=noon_detail())
+    jobs, errors = run(web.fetch_noon, handler)
+    assert len(jobs) == 1 and errors
+
+
+def test_noon_changed_detail_schema_is_not_reported_as_healthy():
+    def handler(request):
+        return httpx.Response(200, text=noon_listing()) if request.url.path == '/jobs' else httpx.Response(200, json={'unexpected': []})
+    jobs, errors = run(web.fetch_noon, handler)
+    assert not jobs and errors
+
+
 def run(function,handler):
     async def execute():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
