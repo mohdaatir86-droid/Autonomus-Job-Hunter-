@@ -25,7 +25,7 @@ async function refreshGulfJobs(){
   const button=document.getElementById('gulfRefreshBtn');button.disabled=true;button.textContent='Checking employer feeds…';
   try{const result=await privateApi('/api/gulf/refresh',{method:'POST'});
     toast(result.status==='already_running'?'Discovery is already running. Refresh the view shortly.':`${result.new_jobs||0} new Gulf roles · ${result.updated_jobs||0} updated${result.errors?.length?' · some feeds need attention':''}`);
-    await Promise.all([loadJobs(),loadGulfSources()]);
+    await Promise.all([loadJobs(),loadGulfSources(),loadSources(),loadReadiness()]);
   }catch(e){toast('Gulf check could not be confirmed: '+e.message,'error')}
   finally{button.disabled=false;button.textContent='Refresh Gulf jobs'}
 }

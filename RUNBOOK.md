@@ -52,6 +52,17 @@ Production discovery uses `.github/workflows/discovery.yml` every six hours. It 
 
 ## Database and deployment
 
+The Vercel project `autonomous-job-hunter-ui` is a compatibility entry point. Its
+version-controlled `vercel.json` temporarily redirects each path to the existing
+Docker service, preserving the path/query and keeping Google/Gmail cookies on
+the canonical workspace origin. It no longer serves a separately copied UI or
+proxies private requests to the obsolete native-Python service. This avoids
+frontend release drift; backend releases immediately update the workspace reached
+from either entry point. Deploy the config through the existing Vercel project,
+without creating a second project. Verify the production alias redirects to
+`https://autonomous-job-hunter-docker.onrender.com/` and that private routes still
+require authentication at the destination.
+
 Use the existing Docker Render service `autonomous-job-hunter-docker`; no native-Python Blueprint is maintained. The Dockerfile installs Python dependencies and includes bundled PostgreSQL migrations. PostgreSQL startup applies additive SQL files in `migrations/` under a transaction/advisory lock. The database role needs schema creation/alter privileges for first startup. Back up existing production data before deployment. The SQLite-to-PostgreSQL copier expects a bootstrapped target schema; initialize it using `database.initialize_database_schema()` before copying. Copying into a nonempty destination does not reconcile conflicting primary keys: use an empty target or plan an explicit data reconciliation.
 
 All workspace API reads and mutations require owner authentication. Exceptions are the separately authenticated n8n/GitHub discovery routes, minimal authentication configuration/session endpoints, and state-verified OAuth callbacks. Gmail status, OAuth initiation and browser health are also private. Gmail initiation now uses POST `/api/gmail/auth`, returning the authorization URL as JSON; update any old GET-based integration.

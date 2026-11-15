@@ -17,7 +17,7 @@ CATALOG = [
     ('Talabat / Delivery Hero', 'https://careers.deliveryhero.com/talabat', 'direct', 'Published SmartRecruiters vacancies; six Gulf countries'),
     ('Careem', 'https://careers.careem.com/', 'direct', 'Public Greenhouse employer feed'),
     ('Lalamove', 'https://jobs.lever.co/lalamove', 'direct', 'Public Lever employer feed'),
-    ('Noon', 'https://joinnoon.com/jobs?department=Operations+%26+Logistics', 'external', 'Official public career search; direct import not implemented, apply on employer site'),
+    ('Noon', 'https://joinnoon.com/jobs?department=Operations+%26+Logistics', 'direct', 'Official operations/logistics listing and active public details; bounded selection, employer login needed to apply'),
     ('Snoonu', 'https://snoonu.keka.com/careers', 'direct', 'Official Keka public active-job feed; full descriptions and explicit locations'),
     ('Kitopi', 'https://www.kitopi.com/careers', 'external', 'Employer career page; linked Lever board returned 404, not an active feed'),
     ('DP World', 'https://ehpv.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'direct', 'Public employer Oracle career feed; operations search with published detail checks'),
@@ -68,7 +68,7 @@ def fit(job, profile, settings):
     text = (title + ' ' + desc).lower()
     years = candidate_years(profile)
     # These are total-experience clauses, not e.g. "two years managing riders".
-    requirements = list(re.finditer(r'(?:(?:minimum|at least|over|more than)\s+)?(\d{1,2})\s*(?:[-–to]+\s*(\d{1,2}))?\s*\+?\s*years?\s+(?:of\s+)?(?:professional\s+|relevant\s+|operational\s+|operations\s+|work\s+)?experience', text))
+    requirements = list(re.finditer(r'(?:(?:minimum|at least|over|more than)\s+)?(\d{1,2})\s*(?:[-–to]+\s*(\d{1,2}))?\s*\+?\s*years?[\x27’]?\s+(?:of\s+)?(?:professional\s+|relevant\s+|operational\s+|operations\s+|work\s+)?experience', text))
     notes = ['Operations leadership scope matches your multi-store / fulfilment background.']
     for requirement in requirements:
         low, high = int(requirement[1]), int(requirement[2]) if requirement[2] else None
@@ -115,7 +115,7 @@ def safe_apply_url(url):
             'jobs.smartrecruiters.com', 'careers.smartrecruiters.com', 'job-boards.greenhouse.io',
             'boards.greenhouse.io', 'boards.eu.greenhouse.io', 'jobs.lever.co', 'careers.careem.com',
             'careers.gmg.com', 'careers.aramex.com', 'www.afuturewithus.com', 'snoonu.keka.com', 'www.amazon.jobs', 'amazon.jobs', 'jobsearch.alshaya.com',
-            'careers.dhl.com', 'careers.majidalfuttaim.com',
+            'careers.dhl.com', 'careers.majidalfuttaim.com', 'joinnoon.com',
             'ehpv.fa.em2.oraclecloud.com', 'efhi.fa.em3.oraclecloud.com'}
     except (ValueError, TypeError):
         return False
@@ -213,14 +213,14 @@ async def fetch_gulf_sources(client, settings):
             errors.append(f'{name}: public feed unavailable; no new verified roles imported')
         return found
     import httpx
-    from gulf_web_feeds import fetch_amazon, fetch_alshaya, fetch_phenom
+    from gulf_web_feeds import fetch_amazon, fetch_alshaya, fetch_phenom, fetch_noon
     async def bounded(name, operation):
         try:
             return await asyncio.wait_for(operation, timeout=60)
         except (TimeoutError, httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError, IndexError):
             return [], [f'{name}: provider time budget or response validation failed; coverage is partial']
 
-    smart, oracle, rss, snoonu, amazon, alshaya, dhl, maf, careem, lalamove = await asyncio.gather(
+    smart, oracle, rss, snoonu, amazon, alshaya, dhl, maf, noon, careem, lalamove = await asyncio.gather(
         bounded('SmartRecruiters', fetch_smartrecruiters(client, profile, settings)),
         bounded('Oracle careers', fetch_oracle_employers(client, profile, settings)),
         bounded('Employer RSS', fetch_rss_employers(client, profile, settings)),
@@ -229,9 +229,10 @@ async def fetch_gulf_sources(client, settings):
         bounded('Alshaya', fetch_alshaya(client, profile, settings)),
         bounded('DHL', fetch_phenom(client, profile, settings, 'DHL', 'careers.dhl.com')),
         bounded('Majid Al Futtaim', fetch_phenom(client, profile, settings, 'Majid Al Futtaim', 'careers.majidalfuttaim.com')),
+        bounded('Noon', fetch_noon(client, profile, settings)),
         employer('Careem', 'https://boards-api.greenhouse.io/v1/boards/careem/jobs?content=true'),
         employer('Lalamove', 'https://api.lever.co/v0/postings/lalamove'))
-    for rows, issues in (smart, oracle, rss, snoonu, amazon, alshaya, dhl, maf):
+    for rows, issues in (smart, oracle, rss, snoonu, amazon, alshaya, dhl, maf, noon):
         jobs.extend(rows)
         errors.extend(issues)
     jobs.extend(careem)
