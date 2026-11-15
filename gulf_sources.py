@@ -68,7 +68,7 @@ def fit(job, profile, settings):
     text = (title + ' ' + desc).lower()
     years = candidate_years(profile)
     # These are total-experience clauses, not e.g. "two years managing riders".
-    requirements = list(re.finditer(r'(?:(?:minimum|at least|over|more than)\s+)?(\d{1,2})\s*(?:[-–to]+\s*(\d{1,2}))?\s*\+?\s*years?\s+(?:of\s+)?(?:professional\s+|relevant\s+|operational\s+|operations\s+|work\s+)?experience', text))
+    requirements = list(re.finditer(r'(?:(?:minimum|at least|over|more than)\s+)?(\d{1,2})\s*(?:[-–to]+\s*(\d{1,2}))?\s*\+?\s*years?[\x27’]?\s+(?:of\s+)?(?:professional\s+|relevant\s+|operational\s+|operations\s+|work\s+)?experience', text))
     notes = ['Operations leadership scope matches your multi-store / fulfilment background.']
     for requirement in requirements:
         low, high = int(requirement[1]), int(requirement[2]) if requirement[2] else None

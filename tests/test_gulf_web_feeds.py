@@ -49,6 +49,7 @@ def test_noon_public_listing_and_active_detail_preserve_date_brand_and_requireme
     {'title': 'Another Operations Manager'}, {'postedAt': 'not-a-date'},
     {'postedAt': '2099-01-01T00:00:00Z'}, {'closesAt': '2000-01-01T00:00:00Z'},
     {'closesAt': 'invalid'}, {'requirements': '4–7 years of experience in logistics operations'},
+    {'requirements': '12–15 years’ experience in operations management'},
 ])
 def test_noon_rejects_inactive_inconsistent_dates_countries_and_experience(changes):
     def handler(request):
