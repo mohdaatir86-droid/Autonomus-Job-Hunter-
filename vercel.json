@@ -2,6 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "redirects": [
     {
+      "source": "/",
+      "destination": "https://autonomous-job-hunter-docker.onrender.com/",
+      "permanent": false
+    },
+    {
       "source": "/:path*",
       "destination": "https://autonomous-job-hunter-docker.onrender.com/:path*",
       "permanent": false
